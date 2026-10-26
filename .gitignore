@@ -1,0 +1,7 @@
+/target
+*.swp
+.idea/
+.vscode/
+.DS_Store
+# Résultats générés en local (les figures du rapport vont dans rapport/figures/)
+/sorties/

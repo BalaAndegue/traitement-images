@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["imagerie"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+authors = [
+    "Bala Andegue Francois Lionnel",
+    "Belekotan II Jeff Nichoss",
+    "Nankeng Tsamo Pierre Marcelle",
+    "Sountsa Djiele Pio Vianney",
+    "Nkamla Chedjou Johan",
+    "Nkolo Atangana Stacy",
+]

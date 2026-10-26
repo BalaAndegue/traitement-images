@@ -1,0 +1,16 @@
+[package]
+name = "imagerie"
+description = "Opérations de traitement d'images vues en cours"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "tiff", "gif"], optional = true }
+
+[features]
+default = ["formats"]
+# Lecture/écriture PNG, JPEG, BMP, TIFF, GIF via la crate `image`.
+# Les formats PGM/PPM sont codés à la main et toujours disponibles.
+formats = ["dep:image"]
