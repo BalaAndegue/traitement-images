@@ -18,5 +18,9 @@
 //! | `morphologie`    | 7. Opérateurs morphologiques          | Stacy            |
 
 pub mod erreur;
+pub mod image;
 
 pub use erreur::{Erreur, Resultat};
+pub use image::{
+    Bord, Connexite, Image, ImageBinaire, ImageEtiquettes, ImageGris, ImageReelle, ImageRvb, Rvb,
+};
