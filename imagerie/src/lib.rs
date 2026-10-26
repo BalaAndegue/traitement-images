@@ -24,6 +24,7 @@ pub mod image;
 
 pub mod arithmetique;
 pub mod bases;
+pub mod interpolation;
 pub mod ponctuel;
 
 pub use erreur::{Erreur, Resultat};
