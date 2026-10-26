@@ -1,10 +1,12 @@
 pub mod arithmetique;
 pub mod bases;
+pub mod binaire;
 pub mod contours;
 pub mod filtrage;
 pub mod fourier;
 pub mod interpolation;
 pub mod ponctuel;
+pub mod segmentation;
 
 use imagerie::es::{self, ImageChargee};
 use imagerie::Resultat;

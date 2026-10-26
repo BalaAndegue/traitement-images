@@ -55,6 +55,12 @@ enum Commande {
     /// Chapitre 5 : contours et transformée de Hough.
     #[command(subcommand)]
     Contours(commandes::contours::Cmd),
+    /// Chapitre 6 : segmentation.
+    #[command(subcommand)]
+    Segmentation(commandes::segmentation::Cmd),
+    /// Chapitre 7 : images binaires et morphologie.
+    #[command(subcommand)]
+    Binaire(commandes::binaire::Cmd),
 }
 
 fn main() -> ExitCode {
@@ -73,6 +79,8 @@ fn main() -> ExitCode {
         Commande::Filtre(c) => commandes::filtrage::executer(c),
         Commande::Fourier(c) => commandes::fourier::executer(c),
         Commande::Contours(c) => commandes::contours::executer(c),
+        Commande::Segmentation(c) => commandes::segmentation::executer(c),
+        Commande::Binaire(c) => commandes::binaire::executer(c),
     };
     match resultat {
         Ok(()) => ExitCode::SUCCESS,
