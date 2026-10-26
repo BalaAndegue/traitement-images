@@ -19,6 +19,7 @@
 
 pub mod alea;
 pub mod erreur;
+pub mod es;
 pub mod image;
 
 pub use erreur::{Erreur, Resultat};
