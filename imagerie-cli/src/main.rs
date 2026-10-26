@@ -34,6 +34,18 @@ enum Commande {
         #[arg(long)]
         gris: bool,
     },
+    /// Chapitre 1 : canaux, quantification, échantillonnage, profils.
+    #[command(subcommand)]
+    Bases(commandes::bases::Cmd),
+    /// Chapitre 2 : histogramme, contraste, égalisation.
+    #[command(subcommand)]
+    Ponctuel(commandes::ponctuel::Cmd),
+    /// Chapitre 2 : opérations logiques et arithmétiques.
+    #[command(subcommand)]
+    Arith(commandes::arithmetique::Cmd),
+    /// Chapitre 2 : interpolation et changement d'échelle.
+    #[command(subcommand)]
+    Interpolation(commandes::interpolation::Cmd),
 }
 
 fn main() -> ExitCode {
@@ -45,6 +57,10 @@ fn main() -> ExitCode {
             sortie,
             gris,
         } => commandes::convertir(&entree, &sortie, gris),
+        Commande::Bases(c) => commandes::bases::executer(c),
+        Commande::Ponctuel(c) => commandes::ponctuel::executer(c),
+        Commande::Arith(c) => commandes::arithmetique::executer(c),
+        Commande::Interpolation(c) => commandes::interpolation::executer(c),
     };
     match resultat {
         Ok(()) => ExitCode::SUCCESS,

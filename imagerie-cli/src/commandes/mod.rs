@@ -1,3 +1,8 @@
+pub mod arithmetique;
+pub mod bases;
+pub mod interpolation;
+pub mod ponctuel;
+
 use imagerie::es::{self, ImageChargee};
 use imagerie::Resultat;
 
