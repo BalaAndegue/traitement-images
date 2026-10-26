@@ -22,6 +22,8 @@ pub mod erreur;
 pub mod es;
 pub mod image;
 
+pub mod bases;
+
 pub use erreur::{Erreur, Resultat};
 pub use image::{
     Bord, Connexite, Image, ImageBinaire, ImageEtiquettes, ImageGris, ImageReelle, ImageRvb, Rvb,
