@@ -46,6 +46,15 @@ enum Commande {
     /// Chapitre 2 : interpolation et changement d'échelle.
     #[command(subcommand)]
     Interpolation(commandes::interpolation::Cmd),
+    /// Chapitre 3 : convolution et filtres.
+    #[command(subcommand)]
+    Filtre(commandes::filtrage::Cmd),
+    /// Chapitre 4 : transformée de Fourier.
+    #[command(subcommand)]
+    Fourier(commandes::fourier::Cmd),
+    /// Chapitre 5 : contours et transformée de Hough.
+    #[command(subcommand)]
+    Contours(commandes::contours::Cmd),
 }
 
 fn main() -> ExitCode {
@@ -61,6 +70,9 @@ fn main() -> ExitCode {
         Commande::Ponctuel(c) => commandes::ponctuel::executer(c),
         Commande::Arith(c) => commandes::arithmetique::executer(c),
         Commande::Interpolation(c) => commandes::interpolation::executer(c),
+        Commande::Filtre(c) => commandes::filtrage::executer(c),
+        Commande::Fourier(c) => commandes::fourier::executer(c),
+        Commande::Contours(c) => commandes::contours::executer(c),
     };
     match resultat {
         Ok(()) => ExitCode::SUCCESS,

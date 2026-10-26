@@ -1,5 +1,8 @@
 pub mod arithmetique;
 pub mod bases;
+pub mod contours;
+pub mod filtrage;
+pub mod fourier;
 pub mod interpolation;
 pub mod ponctuel;
 
