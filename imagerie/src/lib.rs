@@ -30,6 +30,7 @@ pub mod filtrage;
 pub mod fourier;
 pub mod hough;
 pub mod interpolation;
+pub mod morphologie;
 pub mod ponctuel;
 pub mod segmentation;
 
