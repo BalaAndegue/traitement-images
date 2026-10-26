@@ -16,3 +16,7 @@
 //! | `segmentation`   | 6. Segmentation                       | Johan            |
 //! | `binaire`        | 7. Images binaires                    | Stacy            |
 //! | `morphologie`    | 7. Opérateurs morphologiques          | Stacy            |
+
+pub mod erreur;
+
+pub use erreur::{Erreur, Resultat};
