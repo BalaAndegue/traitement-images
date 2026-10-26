@@ -12,7 +12,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Nom de la branche (prenom/module)
+      - name: "Nom de la branche (prenom/module)"
         env:
           BRANCHE: ${{ github.head_ref }}
         run: |
@@ -21,7 +21,7 @@ jobs:
             exit 1
           fi
 
-      - name: Titre de la demande et messages de commit (module : description)
+      - name: "Titre de la demande et messages de commit (module : description)"
         env:
           TITRE: ${{ github.event.pull_request.title }}
           BASE: ${{ github.event.pull_request.base.sha }}
