@@ -24,6 +24,7 @@ pub mod image;
 
 pub mod arithmetique;
 pub mod bases;
+pub mod filtrage;
 pub mod interpolation;
 pub mod ponctuel;
 
