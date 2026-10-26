@@ -24,6 +24,7 @@ pub mod image;
 
 pub mod arithmetique;
 pub mod bases;
+pub mod binaire;
 pub mod contours;
 pub mod filtrage;
 pub mod fourier;
