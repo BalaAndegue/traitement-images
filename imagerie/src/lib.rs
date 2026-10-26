@@ -22,6 +22,7 @@ pub mod erreur;
 pub mod es;
 pub mod image;
 
+pub mod arithmetique;
 pub mod bases;
 pub mod ponctuel;
 
