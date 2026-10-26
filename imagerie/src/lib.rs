@@ -23,6 +23,7 @@ pub mod es;
 pub mod image;
 
 pub mod bases;
+pub mod ponctuel;
 
 pub use erreur::{Erreur, Resultat};
 pub use image::{
