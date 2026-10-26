@@ -1,0 +1,15 @@
+[package]
+name = "imagerie-cli"
+description = "Application en ligne de commande"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "imagerie"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+imagerie = { path = "../imagerie" }
