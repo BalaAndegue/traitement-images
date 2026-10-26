@@ -17,6 +17,7 @@
 //! | `binaire`        | 7. Images binaires                    | Stacy            |
 //! | `morphologie`    | 7. Opérateurs morphologiques          | Stacy            |
 
+pub mod alea;
 pub mod erreur;
 pub mod image;
 
