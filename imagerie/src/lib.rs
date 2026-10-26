@@ -27,6 +27,7 @@ pub mod bases;
 pub mod contours;
 pub mod filtrage;
 pub mod fourier;
+pub mod hough;
 pub mod interpolation;
 pub mod ponctuel;
 
