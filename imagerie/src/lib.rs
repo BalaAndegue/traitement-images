@@ -30,6 +30,7 @@ pub mod fourier;
 pub mod hough;
 pub mod interpolation;
 pub mod ponctuel;
+pub mod segmentation;
 
 pub use erreur::{Erreur, Resultat};
 pub use image::{
