@@ -1,0 +1,57 @@
+name: Conventions
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  conventions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Nom de la branche (prenom/module)
+        env:
+          BRANCHE: ${{ github.head_ref }}
+        run: |
+          if [[ ! "$BRANCHE" =~ ^[a-z]+/[a-z0-9-]+$ ]]; then
+            echo "::error::La branche « $BRANCHE » doit s'appeler prenom/module, par exemple jeff/ponctuel (voir CONTRIBUER.md)."
+            exit 1
+          fi
+
+      - name: Titre de la demande et messages de commit (module : description)
+        env:
+          TITRE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          TETE: ${{ github.event.pull_request.head.sha }}
+        run: |
+          modules='bases|ponctuel|arithmetique|interpolation|filtrage|fourier|contours|hough|segmentation|binaire|morphologie|noyau|cli|gui|rapport|doc|ci'
+          motif="^($modules) : .+"
+          erreur=0
+          if [[ ! "$TITRE" =~ $motif ]]; then
+            echo "::error::Titre « $TITRE » : il doit être de la forme « module : description », par exemple « ponctuel : égalisation d'histogramme »."
+            erreur=1
+          fi
+          while IFS= read -r msg; do
+            [[ "$msg" =~ ^Merge ]] && continue
+            if [[ ! "$msg" =~ $motif ]]; then
+              echo "::error::Commit « $msg » : le message doit être de la forme « module : description »."
+              erreur=1
+            fi
+          done < <(git log --format=%s "$BASE..$TETE")
+          exit $erreur
+
+      - name: Fichiers communs modifiés
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          TETE: ${{ github.event.pull_request.head.sha }}
+        run: |
+          communs='^(Cargo\.toml|imagerie/Cargo\.toml|imagerie/src/(image|es|erreur|lib|alea)\.rs|imagerie-cli/src/main\.rs|imagerie-cli/src/commandes/mod\.rs|\.github/)'
+          touches=$(git diff --name-only "$BASE...$TETE" | grep -E "$communs" || true)
+          if [ -n "$touches" ]; then
+            for f in $touches; do
+              echo "::warning file=$f::Fichier commun modifié : Bala doit être prévenu (voir CONTRIBUER.md)."
+            done
+          fi
