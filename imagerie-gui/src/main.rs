@@ -172,6 +172,7 @@ struct App {
     entree_b: Option<ImageGris>,
     sortie: Option<ImageGris>,
     tex_entree: Option<TextureHandle>,
+    tex_entree_b: Option<TextureHandle>,
     tex_sortie: Option<TextureHandle>,
     hist_entree: ponctuel::Histogramme,
     hist_sortie: ponctuel::Histogramme,
@@ -182,6 +183,10 @@ struct App {
     anim_split: f32,
     toast: Option<Toast>,
     hover_drop: bool,
+    /// En arithmétique : quelle case reçoit le drag (A ou B).
+    drop_slot_b: bool,
+    /// En arithmétique : afficher le résultat au lieu de A|B.
+    vue_resultat_arith: bool,
     pulse: f32,
 }
 
@@ -202,6 +207,7 @@ impl App {
             entree_b: None,
             sortie: None,
             tex_entree: None,
+            tex_entree_b: None,
             tex_sortie: None,
             hist_entree: [0; 256],
             hist_sortie: [0; 256],
@@ -211,6 +217,8 @@ impl App {
             anim_split: 0.5,
             toast: None,
             hover_drop: false,
+            drop_slot_b: false,
+            vue_resultat_arith: false,
             pulse: 0.0,
         }
     }
@@ -244,10 +252,11 @@ impl App {
         }
     }
 
-    fn charger_chemin_b(&mut self, chemin: PathBuf) {
+    fn charger_chemin_b(&mut self, ctx: &egui::Context, chemin: PathBuf) {
         match es::charger_gris(&chemin) {
             Ok(img) => {
                 let (l, h) = img.dimensions();
+                self.tex_entree_b = Some(texture_depuis_gris(ctx, "entree_b", &img));
                 self.entree_b = Some(img);
                 self.chemin_b = Some(chemin);
                 self.toast(format!("Image B chargée · {l}×{h}"), true);
@@ -272,9 +281,9 @@ impl App {
         }
     }
 
-    fn ouvrir_dialogue_b(&mut self) {
+    fn ouvrir_dialogue_b(&mut self, ctx: &egui::Context) {
         if let Some(chemin) = Self::dialogue_ouvrir(true) {
-            self.charger_chemin_b(chemin);
+            self.charger_chemin_b(ctx, chemin);
         }
     }
 
@@ -336,6 +345,9 @@ impl App {
                 self.tex_sortie = Some(texture_depuis_gris(ctx, "sortie", &resultat));
                 self.sortie = Some(resultat);
                 self.split = 0.55;
+                if self.chapitre == Chapitre::Arithmetique {
+                    self.vue_resultat_arith = true;
+                }
                 self.toast(format!("{} appliqué", self.operation.label()), true);
             }
             Err(e) => self.toast(format!("{e}"), false),
@@ -352,7 +364,11 @@ impl App {
         });
         self.hover_drop = ctx.input(|i| !i.raw.hovered_files.is_empty());
         if let Some(chemin) = dropped.into_iter().next() {
-            self.charger_chemin(ctx, chemin);
+            if self.chapitre == Chapitre::Arithmetique && self.drop_slot_b {
+                self.charger_chemin_b(ctx, chemin);
+            } else {
+                self.charger_chemin(ctx, chemin);
+            }
         }
     }
 
@@ -502,7 +518,7 @@ impl App {
                                 )
                                 .clicked()
                             {
-                                self.ouvrir_dialogue_b();
+                                self.ouvrir_dialogue_b(ui.ctx());
                             }
                         }
 
@@ -655,6 +671,12 @@ impl App {
                 Pos2::new(content.max.x, hist.min.y - gap),
             );
 
+            let sous_titre = match self.chapitre {
+                Chapitre::Ponctuel => "comparateur avant / après",
+                Chapitre::Arithmetique if self.vue_resultat_arith => "résultat de l'opération",
+                Chapitre::Arithmetique => "images A et B côte à côte",
+            };
+
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(header), |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
@@ -664,12 +686,14 @@ impl App {
                             .strong(),
                     );
                     ui.label(
-                        egui::RichText::new("comparateur avant / après")
+                        egui::RichText::new(sous_titre)
                             .size(12.5)
                             .color(TEXT_MUTED),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if self.sortie.is_some() {
+                        if self.chapitre == Chapitre::Arithmetique {
+                            self.ui_toggle_vue_arith(ui);
+                        } else if self.sortie.is_some() {
                             ui.label(
                                 egui::RichText::new(format!("split {:.0}%", self.split * 100.0))
                                     .size(12.0)
@@ -680,78 +704,181 @@ impl App {
                 });
             });
 
-            if self.entree.is_none() {
-                self.ui_empty(ui, canvas);
-            } else {
-                self.ui_comparateur(ui, canvas);
+            match self.chapitre {
+                Chapitre::Arithmetique if self.vue_resultat_arith && self.tex_sortie.is_some() => {
+                    self.ui_comparateur(ui, canvas);
+                }
+                Chapitre::Arithmetique => self.ui_duo_arithmetique(ui, canvas),
+                Chapitre::Ponctuel => {
+                    if self.entree.is_none() {
+                        self.ui_slot(
+                            ui,
+                            canvas,
+                            "A",
+                            self.tex_entree.clone(),
+                            self.hover_drop,
+                            true,
+                        );
+                    } else {
+                        self.ui_comparateur(ui, canvas);
+                    }
+                }
             }
 
             self.ui_histogrammes(ui, hist);
         });
     }
 
-    fn ui_empty(&mut self, ui: &mut egui::Ui, rect: Rect) {
-        let pulse = (self.pulse.sin() * 0.5 + 0.5) * 18.0;
-        let border = if self.hover_drop {
-            ACCENT
-        } else {
-            Color32::from_rgb(
-                BORDER.r().saturating_add(pulse as u8),
-                BORDER.g().saturating_add(pulse as u8),
-                BORDER.b().saturating_add((pulse * 0.6) as u8),
-            )
-        };
-        let fill = if self.hover_drop {
-            ACCENT_SOFT
+    fn ui_toggle_vue_arith(&mut self, ui: &mut egui::Ui) {
+        let a_actif = !self.vue_resultat_arith;
+        let r_actif = self.vue_resultat_arith;
+        let a_btn = egui::Button::new(
+            egui::RichText::new("A · B")
+                .size(12.5)
+                .color(if a_actif { ACCENT } else { TEXT_DIM }),
+        )
+        .fill(if a_actif { ACCENT_SOFT } else { SURFACE_3 })
+        .stroke(Stroke::new(
+            1.0,
+            if a_actif { ACCENT } else { BORDER },
+        ))
+        .corner_radius(8.0);
+        let r_btn = egui::Button::new(
+            egui::RichText::new("Résultat")
+                .size(12.5)
+                .color(if r_actif {
+                    ACCENT
+                } else if self.sortie.is_some() {
+                    TEXT_DIM
+                } else {
+                    TEXT_MUTED
+                }),
+        )
+        .fill(if r_actif { ACCENT_SOFT } else { SURFACE_3 })
+        .stroke(Stroke::new(
+            1.0,
+            if r_actif { ACCENT } else { BORDER },
+        ))
+        .corner_radius(8.0);
+
+        // Ordre RTL : on ajoute Résultat puis A·B pour afficher A·B | Résultat
+        let r = ui.add_enabled(self.sortie.is_some(), r_btn);
+        ui.add_space(6.0);
+        let a = ui.add(a_btn);
+        if a.clicked() {
+            self.vue_resultat_arith = false;
+        }
+        if r.clicked() {
+            self.vue_resultat_arith = true;
+        }
+    }
+
+    fn ui_duo_arithmetique(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        let gap = 14.0;
+        let demi = (rect.width() - gap) / 2.0;
+        let gauche = Rect::from_min_size(rect.min, Vec2::new(demi, rect.height()));
+        let droite = Rect::from_min_size(
+            Pos2::new(rect.min.x + demi + gap, rect.min.y),
+            Vec2::new(demi, rect.height()),
+        );
+
+        // Cible du drag selon la position du pointeur
+        if let Some(pos) = ui.ctx().pointer_interact_pos() {
+            if rect.contains(pos) {
+                self.drop_slot_b = pos.x >= droite.min.x;
+            }
+        }
+
+        let drop_a = self.hover_drop && !self.drop_slot_b;
+        let drop_b = self.hover_drop && self.drop_slot_b;
+
+        self.ui_slot(ui, gauche, "A", self.tex_entree.clone(), drop_a, true);
+        self.ui_slot(ui, droite, "B", self.tex_entree_b.clone(), drop_b, false);
+    }
+
+    /// Emplacement image : aperçu ou « + » (clic / drop).
+    fn ui_slot(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        label: &str,
+        texture: Option<TextureHandle>,
+        drop_actif: bool,
+        est_a: bool,
+    ) {
+        let resp = ui.allocate_rect(rect, Sense::click());
+        let hover = resp.hovered() && !drop_actif;
+
+        let fill = if drop_actif {
+            Color32::from_rgb(20, 28, 30)
+        } else if hover {
+            Color32::from_rgb(20, 23, 28)
         } else {
             SURFACE_2
         };
+        let trait_color = if drop_actif {
+            Color32::from_rgb(45, 140, 130)
+        } else if hover {
+            Color32::from_rgb(70, 85, 100)
+        } else {
+            Color32::from_rgb(55, 62, 74)
+        };
 
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(14), fill);
-        ui.painter().rect_stroke(
-            rect,
-            CornerRadius::same(14),
-            Stroke::new(1.5, border),
-            egui::StrokeKind::Inside,
+        let painter = ui.painter();
+        painter.rect_filled(rect, CornerRadius::same(16), fill);
+        dessiner_rect_tirets(painter, rect.shrink(1.0), 16.0, trait_color, 6.0, 5.0);
+
+        painter.text(
+            Pos2::new(rect.left() + 14.0, rect.top() + 12.0),
+            egui::Align2::LEFT_TOP,
+            label,
+            egui::FontId::proportional(13.0),
+            TEXT_MUTED,
         );
 
-        let resp = ui.allocate_rect(rect, Sense::click());
-        if resp.clicked() {
-            self.ouvrir_dialogue(ui.ctx());
+        if let Some(tex) = texture {
+            let inner = rect.shrink2(Vec2::new(16.0, 28.0));
+            let fitted = fit_inside(tex.size_vec2(), inner.size());
+            let img_rect = Rect::from_center_size(inner.center(), fitted);
+            egui::Image::new(&tex)
+                .fit_to_exact_size(fitted)
+                .paint_at(ui, img_rect);
+        } else {
+            let centre = rect.center();
+            let plus_color = if drop_actif {
+                Color32::from_rgb(70, 170, 160)
+            } else if hover {
+                Color32::from_rgb(120, 140, 155)
+            } else {
+                TEXT_MUTED
+            };
+            painter.text(
+                centre,
+                egui::Align2::CENTER_CENTER,
+                "+",
+                egui::FontId::proportional(44.0),
+                plus_color,
+            );
+            painter.text(
+                Pos2::new(centre.x, centre.y + 38.0),
+                egui::Align2::CENTER_TOP,
+                if drop_actif {
+                    "Relâche pour ouvrir"
+                } else {
+                    "Glisse · ou clique"
+                },
+                egui::FontId::proportional(12.5),
+                TEXT_MUTED,
+            );
         }
 
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(rect.height() * 0.28);
-                ui.label(egui::RichText::new("⇩").size(36.0).color(ACCENT));
-                ui.add_space(10.0);
-                ui.label(
-                    egui::RichText::new("Dépose une image ici")
-                        .size(22.0)
-                        .color(TEXT)
-                        .strong(),
-                );
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new("ou clique pour parcourir · PGM, PPM, PNG, JPEG")
-                        .size(13.0)
-                        .color(TEXT_MUTED),
-                );
-                ui.add_space(18.0);
-                let _ = ui.add(
-                    egui::Button::new(
-                        egui::RichText::new("Parcourir les fichiers")
-                            .color(BG)
-                            .strong(),
-                    )
-                    .fill(ACCENT)
-                    .corner_radius(10.0)
-                    .min_size(Vec2::new(200.0, 38.0)),
-                );
-                // Le click sur le bouton est aussi capté par allocate_rect parent.
-            });
-        });
+        if resp.clicked() {
+            if est_a {
+                self.ouvrir_dialogue(ui.ctx());
+            } else {
+                self.ouvrir_dialogue_b(ui.ctx());
+            }
+        }
         ui.ctx().request_repaint();
     }
 
@@ -943,6 +1070,53 @@ impl App {
             egui::FontId::proportional(13.0),
             Color32::from_rgba_unmultiplied(TEXT.r(), TEXT.g(), TEXT.b(), (255.0 * fade) as u8),
         );
+    }
+}
+
+fn dessiner_rect_tirets(
+    painter: &egui::Painter,
+    rect: Rect,
+    rayon: f32,
+    couleur: Color32,
+    tiret: f32,
+    trou: f32,
+) {
+    let stroke = Stroke::new(1.25, couleur);
+    let segments = [
+        // haut
+        (Pos2::new(rect.left() + rayon, rect.top()), Pos2::new(rect.right() - rayon, rect.top())),
+        // bas
+        (Pos2::new(rect.left() + rayon, rect.bottom()), Pos2::new(rect.right() - rayon, rect.bottom())),
+        // gauche
+        (Pos2::new(rect.left(), rect.top() + rayon), Pos2::new(rect.left(), rect.bottom() - rayon)),
+        // droite
+        (Pos2::new(rect.right(), rect.top() + rayon), Pos2::new(rect.right(), rect.bottom() - rayon)),
+    ];
+    for (a, b) in segments {
+        tracer_tirets(painter, a, b, stroke, tiret, trou);
+    }
+}
+
+fn tracer_tirets(
+    painter: &egui::Painter,
+    a: Pos2,
+    b: Pos2,
+    stroke: Stroke,
+    tiret: f32,
+    trou: f32,
+) {
+    let delta = b - a;
+    let len = delta.length();
+    if len < 1.0 {
+        return;
+    }
+    let dir = delta / len;
+    let pas = tiret + trou;
+    let mut d = 0.0;
+    while d < len {
+        let d1 = (d + tiret).min(len);
+        painter.line_segment([a + dir * d, a + dir * d1], stroke);
+        d += pas;
     }
 }
 
