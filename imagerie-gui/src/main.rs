@@ -1,7 +1,6 @@
 //! Interface graphique premium (Option A) — shell type outil photo moderne.
 //!
-//! Les opérations sont encore des démos locales ; elles seront branchées
-//! ensuite sur `imagerie::ponctuel` et les autres modules.
+//! Opérations branchées sur `imagerie::ponctuel` et `imagerie::arithmetique`.
 
 mod theme;
 
@@ -12,8 +11,10 @@ use eframe::egui::{
     self, Color32, ColorImage, CornerRadius, Mesh, Pos2, Rect, Sense, Shape, Stroke, TextureHandle,
     Vec2,
 };
+use imagerie::arithmetique;
 use imagerie::es;
 use imagerie::image::ImageGris;
+use imagerie::ponctuel;
 use theme::{
     ACCENT, ACCENT_SOFT, BG, BORDER, DANGER, HIST_BOT, HIST_TOP, INSPECTOR_W, SIDEBAR_W, SUCCESS,
     SURFACE, SURFACE_2, SURFACE_3, TEXT, TEXT_DIM, TEXT_MUTED,
@@ -36,51 +37,57 @@ fn main() -> eframe::Result {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Chapitre {
-    Bases,
     Ponctuel,
-    Filtrage,
-    Contours,
-    Segmentation,
+    Arithmetique,
 }
 
 impl Chapitre {
     fn toutes() -> &'static [Chapitre] {
-        &[
-            Self::Bases,
-            Self::Ponctuel,
-            Self::Filtrage,
-            Self::Contours,
-            Self::Segmentation,
-        ]
+        &[Self::Ponctuel, Self::Arithmetique]
     }
 
     fn titre(self) -> &'static str {
         match self {
-            Self::Bases => "Bases",
             Self::Ponctuel => "Contraste",
-            Self::Filtrage => "Filtrage",
-            Self::Contours => "Contours",
-            Self::Segmentation => "Segmentation",
+            Self::Arithmetique => "Arithmétique",
         }
     }
 
     fn sous_titre(self) -> &'static str {
         match self {
-            Self::Bases => "Chapitre 1 — canaux, quantification",
-            Self::Ponctuel => "Chapitre 2 — histogramme & contraste",
-            Self::Filtrage => "Chapitre 3 — convolution & filtres",
-            Self::Contours => "Chapitre 5 — gradient & laplacien",
-            Self::Segmentation => "Chapitre 6 — seuillage & régions",
+            Self::Ponctuel => "Chapitre 2 — histogramme & transformations",
+            Self::Arithmetique => "Chapitre 2 — opérations sur deux images",
         }
     }
 
     fn glyphe(self) -> &'static str {
         match self {
-            Self::Bases => "◇",
             Self::Ponctuel => "▦",
-            Self::Filtrage => "◎",
-            Self::Contours => "∿",
-            Self::Segmentation => "▣",
+            Self::Arithmetique => "＋",
+        }
+    }
+
+    fn operations(self) -> &'static [Operation] {
+        match self {
+            Self::Ponctuel => &[
+                Operation::Negatif,
+                Operation::Lineaire,
+                Operation::Saturation,
+                Operation::Gamma,
+                Operation::Log,
+                Operation::Exp,
+                Operation::Egalisation,
+                Operation::EgalisationLocale,
+            ],
+            Self::Arithmetique => &[
+                Operation::Addition,
+                Operation::Soustraction,
+                Operation::DiffAbs,
+                Operation::Multiplication,
+                Operation::Combinaison,
+                Operation::Et,
+                Operation::Ou,
+            ],
         }
     }
 }
@@ -88,17 +95,53 @@ impl Chapitre {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Operation {
     Negatif,
-    Seuil,
-    Eclaircir,
+    Lineaire,
+    Saturation,
+    Gamma,
+    Log,
+    Exp,
+    Egalisation,
+    EgalisationLocale,
+    Addition,
+    Soustraction,
+    DiffAbs,
+    Multiplication,
+    Combinaison,
+    Et,
+    Ou,
 }
 
 impl Operation {
     fn label(self) -> &'static str {
         match self {
             Self::Negatif => "Négatif",
-            Self::Seuil => "Seuil simple",
-            Self::Eclaircir => "Éclaircir",
+            Self::Lineaire => "Étirement linéaire",
+            Self::Saturation => "Linéaire + saturation",
+            Self::Gamma => "Correction gamma",
+            Self::Log => "Logarithme",
+            Self::Exp => "Exponentielle",
+            Self::Egalisation => "Égalisation",
+            Self::EgalisationLocale => "Égalisation locale 7×7",
+            Self::Addition => "Addition",
+            Self::Soustraction => "Soustraction",
+            Self::DiffAbs => "Différence absolue",
+            Self::Multiplication => "Multiplication",
+            Self::Combinaison => "Combinaison linéaire",
+            Self::Et => "ET bit à bit",
+            Self::Ou => "OU bit à bit",
         }
+    }
+
+    fn besoin_image_b(self) -> bool {
+        matches!(
+            self,
+            Self::Addition
+                | Self::Soustraction
+                | Self::DiffAbs
+                | Self::Combinaison
+                | Self::Et
+                | Self::Ou
+        )
     }
 }
 
@@ -118,14 +161,20 @@ struct Stats {
 struct App {
     chapitre: Chapitre,
     operation: Operation,
-    seuil: f32,
+    s_min: f32,
+    s_max: f32,
+    gamma: f32,
+    ratio: f32,
+    alpha: f32,
     chemin: Option<PathBuf>,
+    chemin_b: Option<PathBuf>,
     entree: Option<ImageGris>,
+    entree_b: Option<ImageGris>,
     sortie: Option<ImageGris>,
     tex_entree: Option<TextureHandle>,
     tex_sortie: Option<TextureHandle>,
-    hist_entree: [u32; 256],
-    hist_sortie: [u32; 256],
+    hist_entree: ponctuel::Histogramme,
+    hist_sortie: ponctuel::Histogramme,
     stats_entree: Option<Stats>,
     stats_sortie: Option<Stats>,
     /// 0 = tout entrée, 1 = tout sortie
@@ -142,9 +191,15 @@ impl App {
         Self {
             chapitre: Chapitre::Ponctuel,
             operation: Operation::Negatif,
-            seuil: 128.0,
+            s_min: 40.0,
+            s_max: 200.0,
+            gamma: 1.0,
+            ratio: 1.2,
+            alpha: 0.5,
             chemin: None,
+            chemin_b: None,
             entree: None,
+            entree_b: None,
             sortie: None,
             tex_entree: None,
             tex_sortie: None,
@@ -172,8 +227,8 @@ impl App {
         match es::charger_gris(&chemin) {
             Ok(img) => {
                 let (l, h) = img.dimensions();
-                self.hist_entree = histogramme(&img);
-                self.stats_entree = Some(stats(&img));
+                self.hist_entree = ponctuel::histogramme(&img);
+                self.stats_entree = Some(stats_depuis_lib(&img));
                 self.tex_entree = Some(texture_depuis_gris(ctx, "entree", &img));
                 self.entree = Some(img);
                 self.sortie = None;
@@ -183,59 +238,108 @@ impl App {
                 self.split = 0.5;
                 self.anim_split = 0.5;
                 self.chemin = Some(chemin);
-                self.toast(format!("Image chargée · {l}×{h}"), true);
+                self.toast(format!("Image A chargée · {l}×{h}"), true);
             }
             Err(e) => self.toast(format!("Impossible de lire le fichier : {e}"), false),
         }
     }
 
-    fn ouvrir_dialogue(&mut self, ctx: &egui::Context) {
+    fn charger_chemin_b(&mut self, chemin: PathBuf) {
+        match es::charger_gris(&chemin) {
+            Ok(img) => {
+                let (l, h) = img.dimensions();
+                self.entree_b = Some(img);
+                self.chemin_b = Some(chemin);
+                self.toast(format!("Image B chargée · {l}×{h}"), true);
+            }
+            Err(e) => self.toast(format!("Impossible de lire l'image B : {e}"), false),
+        }
+    }
+
+    fn dialogue_ouvrir(secondaire: bool) -> Option<PathBuf> {
         let mut dialog = rfd::FileDialog::new()
             .add_filter("Images", &["pgm", "ppm", "png", "jpg", "jpeg", "bmp"]);
         if Path::new("images").is_dir() {
             dialog = dialog.set_directory("images");
         }
-        if let Some(chemin) = dialog.pick_file() {
+        let _ = secondaire;
+        dialog.pick_file()
+    }
+
+    fn ouvrir_dialogue(&mut self, ctx: &egui::Context) {
+        if let Some(chemin) = Self::dialogue_ouvrir(false) {
             self.charger_chemin(ctx, chemin);
         }
     }
 
+    fn ouvrir_dialogue_b(&mut self) {
+        if let Some(chemin) = Self::dialogue_ouvrir(true) {
+            self.charger_chemin_b(chemin);
+        }
+    }
+
     fn sync_operations(&mut self) {
-        match self.chapitre {
-            Chapitre::Ponctuel => {
-                if !matches!(self.operation, Operation::Negatif | Operation::Seuil) {
-                    self.operation = Operation::Negatif;
-                }
-            }
-            Chapitre::Segmentation => self.operation = Operation::Seuil,
-            _ => self.operation = Operation::Eclaircir,
+        if !self.chapitre.operations().contains(&self.operation) {
+            self.operation = self.chapitre.operations()[0];
         }
     }
 
     fn appliquer(&mut self, ctx: &egui::Context) {
         let Some(entree) = self.entree.clone() else {
-            self.toast("Ouvre d’abord une image", false);
+            self.toast("Ouvre d’abord une image A", false);
             return;
         };
 
+        if self.operation.besoin_image_b() && self.entree_b.is_none() {
+            self.toast("Cette opération nécessite une image B", false);
+            return;
+        }
+
         let resultat = match self.operation {
-            Operation::Negatif => entree.map(|&p| 255 - p),
-            Operation::Seuil => {
-                let s = self.seuil.round().clamp(0.0, 255.0) as u8;
-                entree.map(|&p| if p >= s { 255 } else { 0 })
+            Operation::Negatif => Ok(ponctuel::negatif(&entree)),
+            Operation::Lineaire => Ok(ponctuel::transformation_lineaire(&entree)),
+            Operation::Saturation => ponctuel::transformation_lineaire_saturation(
+                &entree,
+                self.s_min.round().clamp(0.0, 255.0) as u8,
+                self.s_max.round().clamp(0.0, 255.0) as u8,
+            ),
+            Operation::Gamma => ponctuel::correction_gamma(&entree, self.gamma as f64),
+            Operation::Log => Ok(ponctuel::transformation_log(&entree)),
+            Operation::Exp => Ok(ponctuel::transformation_exp(&entree)),
+            Operation::Egalisation => Ok(ponctuel::egalisation_histogramme(&entree)),
+            Operation::EgalisationLocale => ponctuel::egalisation_locale(&entree, 7),
+            Operation::Multiplication => {
+                arithmetique::multiplication(&entree, self.ratio as f64)
             }
-            Operation::Eclaircir => entree.map(|&p| p.saturating_add(40).min(255)),
+            Operation::Addition => {
+                arithmetique::addition(&entree, self.entree_b.as_ref().unwrap())
+            }
+            Operation::Soustraction => {
+                arithmetique::soustraction(&entree, self.entree_b.as_ref().unwrap())
+            }
+            Operation::DiffAbs => {
+                arithmetique::difference_absolue(&entree, self.entree_b.as_ref().unwrap())
+            }
+            Operation::Combinaison => arithmetique::combinaison_lineaire(
+                &entree,
+                self.entree_b.as_ref().unwrap(),
+                self.alpha as f64,
+            ),
+            Operation::Et => arithmetique::et(&entree, self.entree_b.as_ref().unwrap()),
+            Operation::Ou => arithmetique::ou(&entree, self.entree_b.as_ref().unwrap()),
         };
 
-        self.hist_sortie = histogramme(&resultat);
-        self.stats_sortie = Some(stats(&resultat));
-        self.tex_sortie = Some(texture_depuis_gris(ctx, "sortie", &resultat));
-        self.sortie = Some(resultat);
-        self.split = 0.55;
-        self.toast(
-            format!("{} appliqué (démo — lib bientôt branchée)", self.operation.label()),
-            true,
-        );
+        match resultat {
+            Ok(resultat) => {
+                self.hist_sortie = ponctuel::histogramme(&resultat);
+                self.stats_sortie = Some(stats_depuis_lib(&resultat));
+                self.tex_sortie = Some(texture_depuis_gris(ctx, "sortie", &resultat));
+                self.sortie = Some(resultat);
+                self.split = 0.55;
+                self.toast(format!("{} appliqué", self.operation.label()), true);
+            }
+            Err(e) => self.toast(format!("{e}"), false),
+        }
     }
 
     fn consommer_drop(&mut self, ctx: &egui::Context) {
@@ -250,6 +354,11 @@ impl App {
         if let Some(chemin) = dropped.into_iter().next() {
             self.charger_chemin(ctx, chemin);
         }
+    }
+
+    fn peut_appliquer(&self) -> bool {
+        self.entree.is_some()
+            && (!self.operation.besoin_image_b() || self.entree_b.is_some())
     }
 }
 
@@ -344,7 +453,7 @@ impl App {
                 Stroke::new(1.0, BORDER),
             );
 
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect.shrink(18.0)), |ui| {
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect.shrink(14.0)), |ui| {
                 ui.label(
                     egui::RichText::new(self.chapitre.titre())
                         .size(20.0)
@@ -356,116 +465,174 @@ impl App {
                         .size(12.0)
                         .color(TEXT_MUTED),
                 );
-                ui.add_space(18.0);
+                ui.add_space(12.0);
 
-                section(ui, "Opération");
-                match self.chapitre {
-                    Chapitre::Ponctuel => {
-                        op_choix(ui, &mut self.operation, Operation::Negatif);
-                        op_choix(ui, &mut self.operation, Operation::Seuil);
-                    }
-                    Chapitre::Segmentation => {
-                        op_choix(ui, &mut self.operation, Operation::Seuil);
-                    }
-                    _ => {
-                        op_choix(ui, &mut self.operation, Operation::Eclaircir);
-                        ui.label(
-                            egui::RichText::new("Bientôt branché sur la bibliothèque")
-                                .size(11.5)
-                                .color(TEXT_MUTED),
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        section(ui, "Opération");
+                        for op in self.chapitre.operations() {
+                            op_choix(ui, &mut self.operation, *op);
+                        }
+
+                        ui.add_space(8.0);
+                        self.ui_parametres(ui);
+
+                        if self.operation.besoin_image_b() {
+                            ui.add_space(12.0);
+                            section(ui, "Image B");
+                            let nom_b = self
+                                .chemin_b
+                                .as_ref()
+                                .and_then(|p| p.file_name()?.to_str().map(str::to_owned))
+                                .unwrap_or_else(|| "aucune".into());
+                            ui.label(
+                                egui::RichText::new(nom_b)
+                                    .size(12.5)
+                                    .color(TEXT_DIM),
+                            );
+                            ui.add_space(6.0);
+                            if ui
+                                .add(
+                                    egui::Button::new("Charger l'image B…")
+                                        .fill(SURFACE_3)
+                                        .stroke(Stroke::new(1.0, BORDER))
+                                        .corner_radius(8.0)
+                                        .min_size(Vec2::new(ui.available_width(), 32.0)),
+                                )
+                                .clicked()
+                            {
+                                self.ouvrir_dialogue_b();
+                            }
+                        }
+
+                        ui.add_space(16.0);
+                        let peut = self.peut_appliquer();
+                        let apply = ui.add_enabled(
+                            peut,
+                            egui::Button::new(
+                                egui::RichText::new("Appliquer")
+                                    .size(14.0)
+                                    .color(if peut { BG } else { TEXT_MUTED })
+                                    .strong(),
+                            )
+                            .fill(if peut { ACCENT } else { SURFACE_3 })
+                            .corner_radius(10.0)
+                            .min_size(Vec2::new(ui.available_width(), 40.0)),
                         );
-                    }
-                }
+                        if apply.clicked() {
+                            self.appliquer(ui.ctx());
+                        }
 
-                if self.operation == Operation::Seuil {
-                    ui.add_space(12.0);
-                    section(ui, &format!("Seuil · {:.0}", self.seuil));
-                    ui.add(
-                        egui::Slider::new(&mut self.seuil, 0.0..=255.0)
-                            .show_value(false)
-                            .trailing_fill(true),
-                    );
-                }
+                        ui.add_space(8.0);
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Ouvrir image A…")
+                                        .size(13.0)
+                                        .color(TEXT),
+                                )
+                                .fill(SURFACE_3)
+                                .stroke(Stroke::new(1.0, BORDER))
+                                .corner_radius(10.0)
+                                .min_size(Vec2::new(ui.available_width(), 36.0)),
+                            )
+                            .clicked()
+                        {
+                            self.ouvrir_dialogue(ui.ctx());
+                        }
 
-                ui.add_space(20.0);
-                let peut = self.entree.is_some();
-                let apply = ui.add_enabled(
-                    peut,
-                    egui::Button::new(
-                        egui::RichText::new("Appliquer")
-                            .size(14.0)
-                            .color(if peut { BG } else { TEXT_MUTED })
-                            .strong(),
-                    )
-                    .fill(if peut { ACCENT } else { SURFACE_3 })
-                    .corner_radius(10.0)
-                    .min_size(Vec2::new(ui.available_width(), 40.0)),
-                );
-                if apply.clicked() {
-                    self.appliquer(ui.ctx());
-                }
-
-                ui.add_space(10.0);
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("Ouvrir une image…")
+                        if let Some(chemin) = &self.chemin {
+                            ui.add_space(14.0);
+                            section(ui, "Fichier A");
+                            ui.label(
+                                egui::RichText::new(
+                                    chemin
+                                        .file_name()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or("—"),
+                                )
                                 .size(13.0)
-                                .color(TEXT),
-                        )
-                        .fill(SURFACE_3)
-                        .stroke(Stroke::new(1.0, BORDER))
-                        .corner_radius(10.0)
-                        .min_size(Vec2::new(ui.available_width(), 36.0)),
-                    )
-                    .clicked()
-                {
-                    self.ouvrir_dialogue(ui.ctx());
-                }
+                                .color(TEXT_DIM),
+                            );
+                        }
 
-                if let Some(chemin) = &self.chemin {
-                    ui.add_space(14.0);
-                    section(ui, "Fichier");
-                    ui.label(
-                        egui::RichText::new(
-                            chemin
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("—"),
-                        )
-                        .size(13.0)
-                        .color(TEXT_DIM),
-                    );
-                }
+                        ui.add_space(16.0);
+                        section(ui, "Statistiques");
+                        if let Some(s) = &self.stats_entree {
+                            stats_ligne(ui, "Entrée", s);
+                        } else {
+                            ui.label(
+                                egui::RichText::new("Aucune image")
+                                    .size(12.0)
+                                    .color(TEXT_MUTED),
+                            );
+                        }
+                        if let Some(s) = &self.stats_sortie {
+                            ui.add_space(6.0);
+                            stats_ligne(ui, "Sortie", s);
+                        }
 
-                ui.add_space(18.0);
-                section(ui, "Statistiques");
-                if let Some(s) = &self.stats_entree {
-                    stats_ligne(ui, "Entrée", s);
-                } else {
-                    ui.label(
-                        egui::RichText::new("Aucune image")
-                            .size(12.0)
+                        ui.add_space(16.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Branché sur ponctuel & arithmetique\n(tes modules Jeff).",
+                            )
+                            .size(11.0)
                             .color(TEXT_MUTED),
-                    );
-                }
-                if let Some(s) = &self.stats_sortie {
-                    ui.add_space(6.0);
-                    stats_ligne(ui, "Sortie", s);
-                }
-
-                ui.add_space(20.0);
-                ui.separator();
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new(
-                        "Option A · shell premium egui\nLes algos réels arrivent ensuite.",
-                    )
-                    .size(11.0)
-                    .color(TEXT_MUTED),
-                );
+                        );
+                    });
             });
         });
+    }
+
+    fn ui_parametres(&mut self, ui: &mut egui::Ui) {
+        match self.operation {
+            Operation::Saturation => {
+                section(ui, &format!("Smin · {:.0}", self.s_min));
+                ui.add(
+                    egui::Slider::new(&mut self.s_min, 0.0..=254.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+                if self.s_max <= self.s_min {
+                    self.s_max = (self.s_min + 1.0).min(255.0);
+                }
+                section(ui, &format!("Smax · {:.0}", self.s_max));
+                ui.add(
+                    egui::Slider::new(&mut self.s_max, (self.s_min + 1.0)..=255.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::Gamma => {
+                section(ui, &format!("γ · {:.2}", self.gamma));
+                ui.add(
+                    egui::Slider::new(&mut self.gamma, 0.1..=3.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::Multiplication => {
+                section(ui, &format!("Ratio · {:.2}", self.ratio));
+                ui.add(
+                    egui::Slider::new(&mut self.ratio, 0.0..=3.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::Combinaison => {
+                section(ui, &format!("α · {:.2}", self.alpha));
+                ui.add(
+                    egui::Slider::new(&mut self.alpha, 0.0..=1.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            _ => {}
+        }
     }
 
     fn ui_main(&mut self, ui: &mut egui::Ui, rect: Rect) {
@@ -922,28 +1089,12 @@ fn fit_inside(img: Vec2, box_size: Vec2) -> Vec2 {
     img * s
 }
 
-fn histogramme(img: &ImageGris) -> [u32; 256] {
-    let mut h = [0u32; 256];
-    for &p in img.donnees() {
-        h[p as usize] += 1;
-    }
-    h
-}
-
-fn stats(img: &ImageGris) -> Stats {
-    let mut min = 255u8;
-    let mut max = 0u8;
-    let mut sum = 0u64;
-    for &p in img.donnees() {
-        min = min.min(p);
-        max = max.max(p);
-        sum += p as u64;
-    }
-    let n = img.donnees().len().max(1) as f32;
+fn stats_depuis_lib(img: &ImageGris) -> Stats {
+    let (min, max) = ponctuel::dynamique(img);
     Stats {
         min,
         max,
-        moyenne: sum as f32 / n,
+        moyenne: ponctuel::luminance(img) as f32,
     }
 }
 
