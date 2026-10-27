@@ -1,0 +1,17 @@
+[package]
+name = "imagerie-gui"
+description = "Prototype d'interface graphique (egui)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "imagerie-gui"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.31"
+egui = "0.31"
+imagerie = { path = "../imagerie" }
+rfd = "0.15"
