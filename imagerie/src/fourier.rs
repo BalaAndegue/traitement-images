@@ -24,21 +24,22 @@ impl Complexe {
 
     /// Norme |z| = sqrt(re² + im²).
     pub fn norme(self) -> f64 {
-        todo!("Complexe::norme")
+        self.re.hypot(self.im)
     }
 
     /// Argument (phase) de z.
     pub fn phase(self) -> f64 {
-        todo!("Complexe::phase")
+        self.im.atan2(self.re)
     }
 
     /// e^(i theta).
     pub fn polaire(theta: f64) -> Self {
-        todo!("Complexe::polaire")
+        let (sin, cos) = theta.sin_cos();
+        Complexe::new(cos, sin)
     }
 
     pub fn conjugue(self) -> Self {
-        todo!("Complexe::conjugue")
+        Complexe::new(self.re, -self.im)
     }
 }
 
@@ -150,4 +151,29 @@ pub fn creer_rectangle(
 /// Signal carré (bandes noires et blanches) de période `periode`.
 pub fn creer_signal_carre(largeur: usize, hauteur: usize, periode: usize) -> ImageGris {
     todo!("creer_signal_carre")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f64::consts::{FRAC_PI_2, PI};
+
+    #[test]
+    fn complexe_operations_de_base() {
+        let z = Complexe::new(3.0, 4.0);
+        assert!((z.norme() - 5.0).abs() < 1e-12);
+        assert_eq!(z.conjugue(), Complexe::new(3.0, -4.0));
+
+        let z_reel = Complexe::new(2.0, 0.0);
+        assert!((z_reel.phase() - 0.0).abs() < 1e-12);
+
+        let z_imag = Complexe::new(0.0, 2.0);
+        assert!((z_imag.phase() - FRAC_PI_2).abs() < 1e-12);
+
+        let p0 = Complexe::polaire(0.0);
+        assert!((p0.re - 1.0).abs() < 1e-12 && p0.im.abs() < 1e-12);
+
+        let p_pi = Complexe::polaire(PI);
+        assert!((p_pi.re - (-1.0)).abs() < 1e-12 && p_pi.im.abs() < 1e-12);
+    }
 }
