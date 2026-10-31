@@ -198,9 +198,7 @@ pub fn fft_2d(img: &ImageGris) -> Spectre {
     let reelle_pad = completer_puissance_de_2(&reelle);
     let (w, h) = reelle_pad.dimensions();
 
-    let mut spectre = Spectre::depuis_fonction(w, h, |x, y| {
-        Complexe::new(reelle_pad[(x, y)], 0.0)
-    });
+    let mut spectre = Spectre::depuis_fonction(w, h, |x, y| Complexe::new(reelle_pad[(x, y)], 0.0));
 
     // 1. FFT 1D sur chaque ligne
     for y in 0..h {
@@ -422,25 +420,13 @@ where
 
 /// Passe-bas idéal : on met à zéro les fréquences au-delà de `rayon`.
 pub fn passe_bas(img: &ImageGris, rayon: f64) -> ImageGris {
-    let reelle = appliquer_filtre(img, |dist, _, _| {
-        if dist <= rayon {
-            1.0
-        } else {
-            0.0
-        }
-    });
+    let reelle = appliquer_filtre(img, |dist, _, _| if dist <= rayon { 1.0 } else { 0.0 });
     reelle.vers_gris_sature()
 }
 
 /// Passe-haut idéal : on met à zéro les fréquences en deçà de `rayon`.
 pub fn passe_haut(img: &ImageGris, rayon: f64) -> ImageGris {
-    let reelle = appliquer_filtre(img, |dist, _, _| {
-        if dist >= rayon {
-            1.0
-        } else {
-            0.0
-        }
-    });
+    let reelle = appliquer_filtre(img, |dist, _, _| if dist >= rayon { 1.0 } else { 0.0 });
     reelle.vers_gris_sature()
 }
 
@@ -497,13 +483,7 @@ pub fn coupe_pics(img: &ImageGris, pics: &[(usize, usize)], rayon: f64) -> Image
 
 /// Rehaussement de contraste : image + k x (image filtrée passe-haut).
 pub fn rehaussement(img: &ImageGris, rayon: f64, k: f64) -> ImageGris {
-    let hp = appliquer_filtre(img, |dist, _, _| {
-        if dist >= rayon {
-            1.0
-        } else {
-            0.0
-        }
-    });
+    let hp = appliquer_filtre(img, |dist, _, _| if dist >= rayon { 1.0 } else { 0.0 });
     ImageGris::depuis_fonction(img.largeur(), img.hauteur(), |x, y| {
         let v = (img[(x, y)] as f64) + k * hp[(x, y)];
         v.round().clamp(0.0, 255.0) as u8
@@ -554,13 +534,17 @@ pub fn creer_signal_carre(largeur: usize, hauteur: usize, periode: usize) -> Ima
         return Image::nouvelle(largeur, hauteur, 0);
     }
     let demi = periode / 2;
-    Image::depuis_fonction(largeur, hauteur, |x, _| {
-        if (x % periode) < demi {
-            255
-        } else {
-            0
-        }
-    })
+    Image::depuis_fonction(
+        largeur,
+        hauteur,
+        |x, _| {
+            if (x % periode) < demi {
+                255
+            } else {
+                0
+            }
+        },
+    )
 }
 
 #[cfg(test)]
