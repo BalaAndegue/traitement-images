@@ -25,7 +25,7 @@ impl ElementStructurant {
     ///
     /// `taille` doit être impaire et au moins 1. Pour 3, c'est la 8-connexité.
     pub fn carre(taille: usize) -> Resultat<Self> {
-        if taille == 0 {
+        if taille == 0 || taille.is_multiple_of(2) {
             return Err(Erreur::Parametre(
                 "La taille doit être supérieure à 0".to_string(),
             ));
@@ -61,7 +61,7 @@ impl ElementStructurant {
         let (orig_x, orig_y) = origine;
         for y in 0..masque.hauteur() {
             for x in 0..masque.largeur() {
-                if masque.contient(x as isize, y as isize) {
+                if masque[(x, y)] {
                     decalages.push((x as isize - orig_x as isize, y as isize - orig_y as isize));
                 }
             }
@@ -171,113 +171,295 @@ pub fn gradient_morphologique_gris(img: &ImageGris, es: &ElementStructurant) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::erreur::Erreur;
 
-    fn binaire(pixels: Vec<bool>, largeur: usize) -> ImageBinaire {
-        let hauteur = pixels.len() / largeur;
-        ImageBinaire::depuis_vec(largeur, hauteur, pixels).unwrap()
+    /// Image binaire à partir de lignes de texte ('#' = objet, '.' = fond).
+    fn img(lignes: &[&str]) -> ImageBinaire {
+        let h = lignes.len();
+        let l = lignes[0].len();
+        let donnees = lignes
+            .iter()
+            .flat_map(|s| s.bytes().map(|c| c == b'#'))
+            .collect();
+        ImageBinaire::depuis_vec(l, h, donnees).unwrap()
     }
 
-    fn gris(pixels: Vec<u8>, largeur: usize) -> ImageGris {
-        let hauteur = pixels.len() / largeur;
-        ImageGris::depuis_vec(largeur, hauteur, pixels).unwrap()
+    /// Image binaire en lignes de texte, pour comparer lisiblement.
+    fn texte(i: &ImageBinaire) -> Vec<String> {
+        (0..i.hauteur())
+            .map(|y| {
+                (0..i.largeur())
+                    .map(|x| if i[(x, y)] { '#' } else { '.' })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn trie(es: &ElementStructurant) -> Vec<(isize, isize)> {
+        let mut v = es.decalages.clone();
+        v.sort();
+        v
+    }
+
+    /// `a` est inclus dans `b` (tout pixel objet de `a` l'est dans `b`).
+    fn inclus(a: &ImageBinaire, b: &ImageBinaire) -> bool {
+        a.zip_map(b, |&p, &q| !p || q)
+            .unwrap()
+            .donnees()
+            .iter()
+            .all(|&v| v)
+    }
+
+    /// Image binaire d'allure irrégulière, sans bruit aléatoire.
+    fn irreguliere() -> ImageBinaire {
+        ImageBinaire::depuis_fonction(12, 9, |x, y| (x * 7 + y * 13 + x * y) % 5 < 2)
+    }
+
+    fn gris_irreguliere() -> ImageGris {
+        ImageGris::depuis_fonction(10, 8, |x, y| ((x * 37 + y * 91 + x * y * 5) % 256) as u8)
+    }
+
+    // ----- Éléments structurants -----
+
+    #[test]
+    fn croix_a_cinq_decalages_origine_comprise() {
+        let es = ElementStructurant::croix();
+        assert_eq!(es.decalages.len(), 5);
+        assert!(es.decalages.contains(&(0, 0)));
     }
 
     #[test]
-    fn croix_4_connexite_et_carre_8_connexite() {
-        let croix = ElementStructurant::croix();
-        assert!(croix.decalages.contains(&(0, 0)));
-        assert!(croix.decalages.contains(&(1, 0)));
-        assert!(!croix.decalages.contains(&(1, 1)));
-
-        let carre = ElementStructurant::carre(3).unwrap();
-        assert_eq!(carre.decalages.len(), 9);
-        assert!(carre.decalages.contains(&(1, 1)));
-        assert!(carre.decalages.contains(&(-1, -1)));
-    }
-
-    #[test]
-    fn carre_impair_seulement() {
-        assert!(ElementStructurant::carre(0).is_err());
-        assert!(ElementStructurant::carre(2).is_err());
+    fn carre_valide() {
+        let es = ElementStructurant::carre(3).unwrap();
+        assert_eq!(es.decalages.len(), 9);
+        assert!(es.decalages.contains(&(-1, -1)));
+        assert!(es.decalages.contains(&(1, 1)));
+        assert!(es.decalages.contains(&(0, 0)));
         assert_eq!(
             ElementStructurant::carre(1).unwrap().decalages,
             vec![(0, 0)]
         );
+        assert_eq!(ElementStructurant::carre(5).unwrap().decalages.len(), 25);
     }
 
     #[test]
-    fn disque_et_masque() {
-        let disque = ElementStructurant::disque(1);
-        assert!(disque.decalages.contains(&(0, 0)));
-        assert!(disque.decalages.contains(&(1, 0)));
-        assert!(!disque.decalages.contains(&(1, 1)));
+    fn carre_refuse_taille_nulle_ou_paire() {
+        for taille in [0, 2, 4] {
+            assert!(matches!(
+                ElementStructurant::carre(taille),
+                Err(Erreur::Parametre(_))
+            ));
+        }
+    }
 
-        let masque = binaire(
-            vec![false, true, false, true, true, true, false, true, false],
-            3,
+    #[test]
+    fn disque_rayons_courts() {
+        assert_eq!(ElementStructurant::disque(0).decalages, vec![(0, 0)]);
+        // Le disque de rayon 1 est la croix.
+        assert_eq!(
+            trie(&ElementStructurant::disque(1)),
+            trie(&ElementStructurant::croix())
         );
-        let depuis = ElementStructurant::depuis_masque(&masque, (1, 1));
-        let mut attendu = ElementStructurant::croix().decalages;
-        let mut obtenu = depuis.decalages.clone();
-        attendu.sort();
-        obtenu.sort();
-        assert_eq!(obtenu, attendu);
+        // Rayon 2 : 13 points entiers dans le disque (pas les coins du carré 5x5).
+        let d2 = ElementStructurant::disque(2);
+        assert_eq!(d2.decalages.len(), 13);
+        assert!(!d2.decalages.contains(&(2, 2)));
+        assert!(d2.decalages.contains(&(2, 0)));
     }
 
     #[test]
-    fn dilatation_croix_ne_joint_pas_la_diagonale() {
-        let img = binaire(vec![true, false, false, false], 2);
-        let croix = dilatation(&img, &ElementStructurant::croix());
-        let carre = dilatation(&img, &ElementStructurant::carre(3).unwrap());
-        assert!(!croix[(1, 1)]);
-        assert!(carre[(1, 1)]);
-        assert!(croix[(1, 0)]);
-        assert!(croix[(0, 1)]);
+    fn depuis_masque_retrouve_la_croix() {
+        let masque = img(&[".#.", "###", ".#."]);
+        let es = ElementStructurant::depuis_masque(&masque, (1, 1));
+        assert_eq!(trie(&es), trie(&ElementStructurant::croix()));
     }
 
     #[test]
-    fn erosion_ouverture_et_fermeture() {
-        let croix = ElementStructurant::croix();
-        let point = binaire(
-            vec![false, false, false, false, true, false, false, false, false],
-            3,
-        );
-        assert!(ouverture(&point, &croix).donnees().iter().all(|p| !p));
+    fn depuis_masque_ignore_le_fond_et_decale_l_origine() {
+        let masque = img(&["##.", ".#."]);
+        let es = ElementStructurant::depuis_masque(&masque, (1, 0));
+        assert_eq!(trie(&es), vec![(-1, 0), (0, 0), (0, 1)]);
+    }
 
-        let mut trou = vec![true; 16];
-        trou[5] = false;
-        let img = binaire(trou, 4);
-        assert!(!img[(1, 1)]);
-        assert!(fermeture(&img, &croix)[(1, 1)]);
+    // ----- Érosion et dilatation binaires -----
+
+    #[test]
+    fn erosion_d_un_carre_par_la_croix() {
+        let i = img(&[".....", ".###.", ".###.", ".###.", "....."]);
+        let r = erosion(&i, &ElementStructurant::croix());
+        assert_eq!(texte(&r), [".....", ".....", "..#..", ".....", "....."]);
     }
 
     #[test]
-    fn gradients_binaires() {
-        let img = binaire(
-            vec![false, false, false, false, true, false, false, false, false],
-            3,
-        );
+    fn dilatation_d_un_pixel_isole() {
+        let i = img(&[".....", ".....", "..#..", ".....", "....."]);
+        let r = dilatation(&i, &ElementStructurant::croix());
+        assert_eq!(texte(&r), [".....", "..#..", ".###.", "..#..", "....."]);
+        let r = dilatation(&i, &ElementStructurant::carre(3).unwrap());
+        assert_eq!(texte(&r), [".....", ".###.", ".###.", ".###.", "....."]);
+    }
+
+    #[test]
+    fn erosion_mange_le_bord_de_l_image() {
+        // Hors image = fond : un objet collé au bord est érodé de ce côté aussi.
+        let i = img(&["###", "###", "###"]);
+        let r = erosion(&i, &ElementStructurant::croix());
+        assert_eq!(texte(&r), ["...", ".#.", "..."]);
+    }
+
+    #[test]
+    fn element_reduit_a_l_origine_ne_change_rien() {
+        let es = ElementStructurant {
+            decalages: vec![(0, 0)],
+        };
+        let i = irreguliere();
+        assert_eq!(erosion(&i, &es), i);
+        assert_eq!(dilatation(&i, &es), i);
+    }
+
+    #[test]
+    fn erosion_incluse_dans_image_incluse_dans_dilatation() {
+        let i = irreguliere();
+        for es in [
+            ElementStructurant::croix(),
+            ElementStructurant::carre(3).unwrap(),
+            ElementStructurant::disque(2),
+        ] {
+            assert!(inclus(&erosion(&i, &es), &i));
+            assert!(inclus(&i, &dilatation(&i, &es)));
+        }
+    }
+
+    #[test]
+    fn image_vide_et_image_pleine() {
+        let vide = img(&["...", "...", "..."]);
         let es = ElementStructurant::croix();
-        let interne = gradient_interne(&img, &es);
-        let externe = gradient_externe(&img, &es);
-        assert!(interne[(1, 1)]);
-        assert!(!interne[(0, 1)]);
-        assert!(externe[(0, 1)]);
-        assert!(!externe[(1, 1)]);
-        let morpho = gradient_morphologique(&img, &es);
-        assert!(morpho[(1, 1)]);
-        assert!(morpho[(1, 0)]);
+        assert_eq!(erosion(&vide, &es), vide);
+        assert_eq!(dilatation(&vide, &es), vide);
+        let pleine = img(&["###", "###", "###"]);
+        assert_eq!(dilatation(&pleine, &es), pleine);
+    }
+
+    // ----- Ouverture et fermeture -----
+
+    #[test]
+    fn ouverture_supprime_le_bruit_et_garde_les_gros_objets() {
+        let i = img(&["###.....", "###..#..", "###....."]);
+        let es = ElementStructurant::carre(3).unwrap();
+        let r = ouverture(&i, &es);
+        assert_eq!(texte(&r), ["###.....", "###.....", "###....."]);
     }
 
     #[test]
-    fn niveaux_de_gris_min_max() {
-        let img = gris(vec![1, 8, 3, 4, 9, 2, 0, 7, 5], 3);
+    fn ouverture_est_anti_extensive_et_idempotente() {
+        let i = irreguliere();
+        for es in [
+            ElementStructurant::croix(),
+            ElementStructurant::carre(3).unwrap(),
+        ] {
+            let o = ouverture(&i, &es);
+            assert!(inclus(&o, &i));
+            assert_eq!(ouverture(&o, &es), o);
+        }
+    }
+
+    #[test]
+    fn fermeture_bouche_un_trou() {
+        let i = img(&[
+            ".......", ".#####.", ".#####.", ".##.##.", ".#####.", ".#####.", ".......",
+        ]);
+        let r = fermeture(&i, &ElementStructurant::carre(3).unwrap());
+        assert_eq!(
+            texte(&r),
+            [".......", ".#####.", ".#####.", ".#####.", ".#####.", ".#####.", "......."]
+        );
+    }
+
+    // ----- Gradients -----
+
+    fn carre_au_centre() -> ImageBinaire {
+        img(&[
+            ".......", ".......", "..###..", "..###..", "..###..", ".......", ".......",
+        ])
+    }
+
+    #[test]
+    fn gradient_interne_est_un_anneau() {
+        let r = gradient_interne(&carre_au_centre(), &ElementStructurant::croix());
+        assert_eq!(r.nb_pixels_objet(), 8);
+        assert!(!r[(3, 3)]);
+        assert!(r[(2, 2)]);
+    }
+
+    #[test]
+    fn gradient_externe_est_hors_de_l_objet() {
+        let i = carre_au_centre();
+        let r = gradient_externe(&i, &ElementStructurant::croix());
+        assert_eq!(r.nb_pixels_objet(), 12);
+        // Aucun pixel du gradient externe n'appartient à l'objet.
+        assert!(r
+            .zip_map(&i, |&g, &p| g && p)
+            .unwrap()
+            .donnees()
+            .iter()
+            .all(|&v| !v));
+        assert!(r[(1, 3)]);
+    }
+
+    #[test]
+    fn gradient_morphologique_est_la_somme_des_deux() {
+        let i = carre_au_centre();
         let es = ElementStructurant::croix();
-        assert_eq!(erosion_gris(&img, &es)[(1, 1)], 2);
-        assert_eq!(dilatation_gris(&img, &es)[(1, 1)], 9);
-        let gradient = gradient_morphologique_gris(&img, &es);
-        assert_eq!(gradient[(1, 1)], 7);
-        assert!(ouverture_gris(&img, &es)[(1, 1)] <= img[(1, 1)]);
-        assert!(fermeture_gris(&img, &es)[(1, 1)] >= img[(1, 1)]);
+        let g = gradient_morphologique(&i, &es);
+        // dilatée (21 pixels) moins érodée (1 pixel).
+        assert_eq!(g.nb_pixels_objet(), 20);
+        let somme = gradient_interne(&i, &es)
+            .zip_map(&gradient_externe(&i, &es), |&a, &b| a || b)
+            .unwrap();
+        assert_eq!(g, somme);
+    }
+
+    // ----- Niveaux de gris -----
+
+    #[test]
+    fn gris_uniforme_inchange_et_bords_ignores() {
+        let i = ImageGris::nouvelle(3, 3, 100);
+        let es = ElementStructurant::croix();
+        // Les pixels hors image sont ignorés : pas de bord noir.
+        assert_eq!(erosion_gris(&i, &es), i);
+        assert_eq!(dilatation_gris(&i, &es), i);
+        assert_eq!(
+            gradient_morphologique_gris(&i, &es),
+            ImageGris::nouvelle(3, 3, 0)
+        );
+    }
+
+    #[test]
+    fn gris_minimum_et_maximum_sous_l_element() {
+        let i = ImageGris::depuis_vec(3, 3, vec![10, 10, 10, 10, 200, 10, 10, 10, 10]).unwrap();
+        let es = ElementStructurant::croix();
+        let d = dilatation_gris(&i, &es);
+        assert_eq!(d.donnees(), &[10, 200, 10, 200, 200, 200, 10, 200, 10]);
+        let e = erosion_gris(&i, &es);
+        assert_eq!(e.donnees(), &[10; 9]);
+        let g = gradient_morphologique_gris(&i, &es);
+        assert_eq!(g.donnees(), &[0, 190, 0, 190, 190, 190, 0, 190, 0]);
+    }
+
+    #[test]
+    fn gris_erosion_sous_image_sous_dilatation() {
+        let i = gris_irreguliere();
+        let es = ElementStructurant::carre(3).unwrap();
+        let e = erosion_gris(&i, &es);
+        let d = dilatation_gris(&i, &es);
+        let o = ouverture_gris(&i, &es);
+        let f = fermeture_gris(&i, &es);
+        for y in 0..i.hauteur() {
+            for x in 0..i.largeur() {
+                assert!(e[(x, y)] <= i[(x, y)] && i[(x, y)] <= d[(x, y)]);
+                assert!(o[(x, y)] <= i[(x, y)]);
+                assert!(f[(x, y)] >= i[(x, y)]);
+            }
+        }
     }
 }
