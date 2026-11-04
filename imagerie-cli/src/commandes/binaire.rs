@@ -6,31 +6,59 @@ use imagerie::Resultat;
 
 #[derive(Subcommand)]
 pub enum Cmd {
-    Etiquetage { entree: String, sortie: String, #[arg(long)] huit: bool },
+    Etiquetage {
+        entree: String,
+        sortie: String,
+        #[arg(long)]
+        huit: bool,
+    },
 
     /// Nombre d'objets.
-    Compter { entree: String, #[arg(long)] huit: bool },
+    Compter {
+        entree: String,
+        #[arg(long)]
+        huit: bool,
+    },
 
     /// Supprime les objets de moins de `surface_min` pixels.
     Nettoyer {
         entree: String,
         sortie: String,
         surface_min: usize,
-        #[arg(long)] huit: bool,
+        #[arg(long)]
+        huit: bool,
     },
 
     /// Carte des distances (D4 par défaut, D8 avec --d8).
-    Distances { entree: String, sortie: String, #[arg(long)] d8: bool },
+    Distances {
+        entree: String,
+        sortie: String,
+        #[arg(long)]
+        d8: bool,
+    },
 
     /// Code de Freeman du contour.
-    Freeman { entree: String, #[arg(long)] huit: bool },
+    Freeman {
+        entree: String,
+        #[arg(long)]
+        huit: bool,
+    },
 
     /// Seuillage par hystérésis.
-    Hysteresis { entree: String, sortie: String, bas: f64, haut: f64 },
+    Hysteresis {
+        entree: String,
+        sortie: String,
+        bas: f64,
+        haut: f64,
+    },
 }
 
 fn connexite(huit: bool) -> Connexite {
-    if huit { Connexite::Huit } else { Connexite::Quatre }
+    if huit {
+        Connexite::Huit
+    } else {
+        Connexite::Quatre
+    }
 }
 
 pub fn executer(cmd: Cmd) -> Resultat<()> {
@@ -57,7 +85,12 @@ pub fn executer(cmd: Cmd) -> Resultat<()> {
             Ok(())
         }
 
-        Cmd::Nettoyer { entree, sortie, surface_min, huit } => {
+        Cmd::Nettoyer {
+            entree,
+            sortie,
+            surface_min,
+            huit,
+        } => {
             let masque = es::charger_gris(entree)?.map(|&p| p >= 128);
             let net = binaire::supprimer_petits_objets(&masque, surface_min, connexite(huit));
             es::enregistrer_gris(&net.vers_gris(), sortie)
@@ -65,7 +98,11 @@ pub fn executer(cmd: Cmd) -> Resultat<()> {
 
         Cmd::Distances { entree, sortie, d8 } => {
             let masque = es::charger_gris(entree)?.map(|&p| p >= 128);
-            let d = if d8 { binaire::Distance::D8 } else { binaire::Distance::D4 };
+            let d = if d8 {
+                binaire::Distance::D8
+            } else {
+                binaire::Distance::D4
+            };
             let carte = binaire::carte_distances(&masque, d);
             es::enregistrer_gris(&carte.map(|&v| v as f64).vers_gris_normalise(), sortie)
         }
@@ -79,7 +116,12 @@ pub fn executer(cmd: Cmd) -> Resultat<()> {
             Ok(())
         }
 
-        Cmd::Hysteresis { entree, sortie, bas, haut } => {
+        Cmd::Hysteresis {
+            entree,
+            sortie,
+            bas,
+            haut,
+        } => {
             let img = es::charger_gris(entree)?.vers_reelle();
             let res = binaire::seuillage_hysteresis(&img, bas, haut)?;
             es::enregistrer_gris(&res.vers_gris(), sortie)

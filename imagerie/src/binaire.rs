@@ -170,7 +170,10 @@ pub fn freeman(img: &ImageBinaire, connexite: Connexite) -> Option<CodeFreeman> 
 
         codes.push(d as u8);
         let (dx, dy) = table[d];
-        pos = ((pos.0 as isize + dx) as usize, (pos.1 as isize + dy) as usize);
+        pos = (
+            (pos.0 as isize + dx) as usize,
+            (pos.1 as isize + dy) as usize,
+        );
         etat = if n4 {
             d
         } else if d % 2 == 0 {
@@ -474,7 +477,10 @@ mod tests {
     fn img(lignes: &[&str]) -> ImageBinaire {
         let h = lignes.len();
         let l = lignes[0].len();
-        let d = lignes.iter().flat_map(|s| s.bytes().map(|c| c == b'#')).collect();
+        let d = lignes
+            .iter()
+            .flat_map(|s| s.bytes().map(|c| c == b'#'))
+            .collect();
         ImageBinaire::depuis_vec(l, h, d).unwrap()
     }
 
