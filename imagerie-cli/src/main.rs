@@ -58,9 +58,12 @@ enum Commande {
     /// Chapitre 6 : segmentation.
     #[command(subcommand)]
     Segmentation(commandes::segmentation::Cmd),
-    /// Chapitre 7 : images binaires et morphologie.
+    /// Chapitre 7 : images binaires.
     #[command(subcommand)]
     Binaire(commandes::binaire::Cmd),
+    /// Chapitre 7 : érosion, dilatation, ouverture, fermeture.
+    #[command(subcommand)]
+    Morphologie(commandes::morphologie::Cmd),
 }
 
 fn main() -> ExitCode {
@@ -81,6 +84,7 @@ fn main() -> ExitCode {
         Commande::Contours(c) => commandes::contours::executer(c),
         Commande::Segmentation(c) => commandes::segmentation::executer(c),
         Commande::Binaire(c) => commandes::binaire::executer(c),
+        Commande::Morphologie(c) => commandes::morphologie::executer(c),
     };
     match resultat {
         Ok(()) => ExitCode::SUCCESS,
