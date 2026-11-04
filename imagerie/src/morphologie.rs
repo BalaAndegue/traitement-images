@@ -121,23 +121,47 @@ pub fn gradient_morphologique(img: &ImageBinaire, es: &ElementStructurant) -> Im
 
 /// Érosion en niveaux de gris : minimum sous l'élément.
 pub fn erosion_gris(img: &ImageGris, es: &ElementStructurant) -> ImageGris {
-    todo!("erosion_gris")
+    ImageGris::depuis_fonction(img.largeur(), img.hauteur(), |x, y| {
+        es.decalages
+            .iter()
+            .map(|&(dx, dy)| {
+                img.pixel_etendu(x as isize + dx, y as isize + dy, Bord::Zero)
+                    .unwrap_or(0)
+            })
+            .min()
+            .unwrap_or(0)
+    })
 }
 
 /// Dilatation en niveaux de gris : maximum sous l'élément.
 pub fn dilatation_gris(img: &ImageGris, es: &ElementStructurant) -> ImageGris {
-    todo!("dilatation_gris")
+    ImageGris::depuis_fonction(img.largeur(), img.hauteur(), |x, y| {
+        es.decalages
+            .iter()
+            .map(|&(dx, dy)| {
+                img.pixel_etendu(x as isize + dx, y as isize + dy, Bord::Zero)
+                    .unwrap_or(0)
+            })
+            .max()
+            .unwrap_or(0)
+    })
 }
 
 pub fn ouverture_gris(img: &ImageGris, es: &ElementStructurant) -> ImageGris {
-    todo!("ouverture_gris")
+    dilatation_gris(&erosion_gris(img, es), es)
 }
 
 pub fn fermeture_gris(img: &ImageGris, es: &ElementStructurant) -> ImageGris {
-    todo!("fermeture_gris")
+    erosion_gris(&dilatation_gris(img, es), es)
 }
 
 /// Gradient morphologique en niveaux de gris : dilatée - érodée.
 pub fn gradient_morphologique_gris(img: &ImageGris, es: &ElementStructurant) -> ImageGris {
-    todo!("gradient_morphologique_gris")
+    let dilatee = dilatation_gris(img, es);
+    let erodee = erosion_gris(img, es);
+    ImageGris::depuis_fonction(img.largeur(), img.hauteur(), |x, y| {
+        let d = dilatee.get(x, y).unwrap_or(&0);
+        let e = erodee.get(x, y).unwrap_or(&0);
+        d.saturating_sub(*e)
+    })
 }
