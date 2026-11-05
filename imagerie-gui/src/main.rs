@@ -12,8 +12,12 @@ use eframe::egui::{
     Vec2,
 };
 use imagerie::arithmetique;
+use imagerie::bases;
+use imagerie::binaire;
 use imagerie::es;
-use imagerie::image::ImageGris;
+use imagerie::fourier;
+use imagerie::image::{Connexite, ImageBinaire, ImageGris};
+use imagerie::morphologie::{self, ElementStructurant};
 use imagerie::ponctuel;
 use theme::{
     ACCENT, ACCENT_SOFT, BG, BORDER, DANGER, HIST_BOT, HIST_TOP, INSPECTOR_W, SIDEBAR_W, SUCCESS,
@@ -37,38 +41,67 @@ fn main() -> eframe::Result {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Chapitre {
+    Bases,
     Ponctuel,
     Arithmetique,
+    Fourier,
+    Morphologie,
+    Binaire,
 }
 
 impl Chapitre {
     fn toutes() -> &'static [Chapitre] {
-        &[Self::Ponctuel, Self::Arithmetique]
+        &[
+            Self::Bases,
+            Self::Ponctuel,
+            Self::Arithmetique,
+            Self::Fourier,
+            Self::Morphologie,
+            Self::Binaire,
+        ]
     }
 
     fn titre(self) -> &'static str {
         match self {
+            Self::Bases => "Bases",
             Self::Ponctuel => "Contraste",
             Self::Arithmetique => "Arithmétique",
+            Self::Fourier => "Fourier",
+            Self::Morphologie => "Morphologie",
+            Self::Binaire => "Binaire",
         }
     }
 
     fn sous_titre(self) -> &'static str {
         match self {
+            Self::Bases => "Chapitre 1 — quantification & échantillonnage",
             Self::Ponctuel => "Chapitre 2 — histogramme & transformations",
             Self::Arithmetique => "Chapitre 2 — opérations sur deux images",
+            Self::Fourier => "Chapitre 4 — spectre & filtres fréquentiels",
+            Self::Morphologie => "Chapitre 7 — érosion, dilatation…",
+            Self::Binaire => "Chapitre 7 — distances, étiquetage…",
         }
     }
 
     fn glyphe(self) -> &'static str {
         match self {
-            Self::Ponctuel => "▦",
-            Self::Arithmetique => "＋",
+            Self::Bases => "1",
+            Self::Ponctuel => "2",
+            Self::Arithmetique => "+",
+            Self::Fourier => "F",
+            Self::Morphologie => "M",
+            Self::Binaire => "B",
         }
     }
 
     fn operations(self) -> &'static [Operation] {
         match self {
+            Self::Bases => &[
+                Operation::Quantifier,
+                Operation::Pixeliser,
+                Operation::Echantillonner,
+                Operation::ProfilLigne,
+            ],
             Self::Ponctuel => &[
                 Operation::Negatif,
                 Operation::Lineaire,
@@ -88,12 +121,38 @@ impl Chapitre {
                 Operation::Et,
                 Operation::Ou,
             ],
+            Self::Fourier => &[
+                Operation::Spectre,
+                Operation::PasseBas,
+                Operation::PasseHaut,
+                Operation::PasseBande,
+                Operation::Rehaussement,
+            ],
+            Self::Morphologie => &[
+                Operation::ErosionGris,
+                Operation::DilatationGris,
+                Operation::OuvertureGris,
+                Operation::FermetureGris,
+                Operation::GradientMorphoGris,
+            ],
+            Self::Binaire => &[
+                Operation::SeuilBinaire,
+                Operation::CarteDistances,
+                Operation::Etiquetage,
+                Operation::SupprimerPetits,
+            ],
         }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Operation {
+    // Bases
+    Quantifier,
+    Pixeliser,
+    Echantillonner,
+    ProfilLigne,
+    // Ponctuel
     Negatif,
     Lineaire,
     Saturation,
@@ -102,6 +161,7 @@ enum Operation {
     Exp,
     Egalisation,
     EgalisationLocale,
+    // Arithmétique
     Addition,
     Soustraction,
     DiffAbs,
@@ -109,11 +169,57 @@ enum Operation {
     Combinaison,
     Et,
     Ou,
+    // Fourier
+    Spectre,
+    PasseBas,
+    PasseHaut,
+    PasseBande,
+    Rehaussement,
+    // Morphologie
+    ErosionGris,
+    DilatationGris,
+    OuvertureGris,
+    FermetureGris,
+    GradientMorphoGris,
+    // Binaire
+    SeuilBinaire,
+    CarteDistances,
+    Etiquetage,
+    SupprimerPetits,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EsChoix {
+    Croix,
+    Carre3,
+    Disque2,
+}
+
+impl EsChoix {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Croix => "Croix (4)",
+            Self::Carre3 => "Carré 3×3",
+            Self::Disque2 => "Disque r=2",
+        }
+    }
+
+    fn element(self) -> ElementStructurant {
+        match self {
+            Self::Croix => ElementStructurant::croix(),
+            Self::Carre3 => ElementStructurant::carre(3).expect("3 est impair"),
+            Self::Disque2 => ElementStructurant::disque(2),
+        }
+    }
 }
 
 impl Operation {
     fn label(self) -> &'static str {
         match self {
+            Self::Quantifier => "Quantification",
+            Self::Pixeliser => "Pixelisation",
+            Self::Echantillonner => "Échantillonnage",
+            Self::ProfilLigne => "Profil (ligne milieu)",
             Self::Negatif => "Négatif",
             Self::Lineaire => "Étirement linéaire",
             Self::Saturation => "Linéaire + saturation",
@@ -129,6 +235,20 @@ impl Operation {
             Self::Combinaison => "Combinaison linéaire",
             Self::Et => "ET bit à bit",
             Self::Ou => "OU bit à bit",
+            Self::Spectre => "Spectre FFT",
+            Self::PasseBas => "Passe-bas",
+            Self::PasseHaut => "Passe-haut",
+            Self::PasseBande => "Passe-bande",
+            Self::Rehaussement => "Rehaussement",
+            Self::ErosionGris => "Érosion (gris)",
+            Self::DilatationGris => "Dilatation (gris)",
+            Self::OuvertureGris => "Ouverture (gris)",
+            Self::FermetureGris => "Fermeture (gris)",
+            Self::GradientMorphoGris => "Gradient morpho",
+            Self::SeuilBinaire => "Seuillage binaire",
+            Self::CarteDistances => "Carte des distances",
+            Self::Etiquetage => "Étiquetage",
+            Self::SupprimerPetits => "Supprimer petits objets",
         }
     }
 
@@ -166,6 +286,14 @@ struct App {
     gamma: f32,
     ratio: f32,
     alpha: f32,
+    nb_niveaux: f32,
+    pas: f32,
+    rayon_freq: f32,
+    rayon_freq_max: f32,
+    k_rehausse: f32,
+    seuil_bin: f32,
+    surface_min: f32,
+    es_choix: EsChoix,
     chemin: Option<PathBuf>,
     chemin_b: Option<PathBuf>,
     entree: Option<ImageGris>,
@@ -201,6 +329,14 @@ impl App {
             gamma: 1.0,
             ratio: 1.2,
             alpha: 0.5,
+            nb_niveaux: 8.0,
+            pas: 4.0,
+            rayon_freq: 30.0,
+            rayon_freq_max: 80.0,
+            k_rehausse: 1.5,
+            seuil_bin: 128.0,
+            surface_min: 50.0,
+            es_choix: EsChoix::Croix,
             chemin: None,
             chemin_b: None,
             entree: None,
@@ -304,7 +440,25 @@ impl App {
             return;
         }
 
+        let pas = self.pas.round().max(1.0) as usize;
+        let niveaux = self.nb_niveaux.round().clamp(2.0, 256.0) as u16;
+        let rayon = self.rayon_freq as f64;
+        let rayon_max = self.rayon_freq_max as f64;
+        let seuil = self.seuil_bin.round().clamp(0.0, 255.0) as u8;
+        let es = self.es_choix.element();
+        let bin = || en_binaire(&entree, seuil);
+
         let resultat = match self.operation {
+            // Bases
+            Operation::Quantifier => bases::quantifier(&entree, niveaux),
+            Operation::Pixeliser => bases::pixeliser(&entree, pas),
+            Operation::Echantillonner => bases::echantillonner(&entree, pas),
+            Operation::ProfilLigne => {
+                let y = entree.hauteur() / 2;
+                let profil = bases::profil_ligne(&entree, y);
+                Ok(bases::image_profil(&profil, 128))
+            }
+            // Ponctuel
             Operation::Negatif => Ok(ponctuel::negatif(&entree)),
             Operation::Lineaire => Ok(ponctuel::transformation_lineaire(&entree)),
             Operation::Saturation => ponctuel::transformation_lineaire_saturation(
@@ -317,6 +471,7 @@ impl App {
             Operation::Exp => Ok(ponctuel::transformation_exp(&entree)),
             Operation::Egalisation => Ok(ponctuel::egalisation_histogramme(&entree)),
             Operation::EgalisationLocale => ponctuel::egalisation_locale(&entree, 7),
+            // Arithmétique
             Operation::Multiplication => {
                 arithmetique::multiplication(&entree, self.ratio as f64)
             }
@@ -336,6 +491,48 @@ impl App {
             ),
             Operation::Et => arithmetique::et(&entree, self.entree_b.as_ref().unwrap()),
             Operation::Ou => arithmetique::ou(&entree, self.entree_b.as_ref().unwrap()),
+            // Fourier
+            Operation::Spectre => {
+                let spectre = fourier::fft_2d(&entree);
+                Ok(fourier::spectre_affichable(&spectre))
+            }
+            Operation::PasseBas => Ok(fourier::passe_bas(&entree, rayon)),
+            Operation::PasseHaut => Ok(fourier::passe_haut(&entree, rayon)),
+            Operation::PasseBande => fourier::passe_bande(&entree, rayon, rayon_max),
+            Operation::Rehaussement => {
+                Ok(fourier::rehaussement(&entree, rayon, self.k_rehausse as f64))
+            }
+            // Morphologie
+            Operation::ErosionGris => Ok(morphologie::erosion_gris(&entree, &es)),
+            Operation::DilatationGris => Ok(morphologie::dilatation_gris(&entree, &es)),
+            Operation::OuvertureGris => Ok(morphologie::ouverture_gris(&entree, &es)),
+            Operation::FermetureGris => Ok(morphologie::fermeture_gris(&entree, &es)),
+            Operation::GradientMorphoGris => {
+                Ok(morphologie::gradient_morphologique_gris(&entree, &es))
+            }
+            // Binaire
+            Operation::SeuilBinaire => Ok(bin().vers_gris()),
+            Operation::CarteDistances => {
+                let carte = binaire::carte_distances(&bin(), binaire::Distance::D4);
+                let max = carte.donnees().iter().copied().filter(|&v| v < u32::MAX).max().unwrap_or(1).max(1);
+                Ok(carte.map(|&v| {
+                    if v == u32::MAX {
+                        255
+                    } else {
+                        ((255.0 * v as f64) / max as f64).round() as u8
+                    }
+                }))
+            }
+            Operation::Etiquetage => {
+                let (etiq, _) = binaire::etiqueter(&bin(), Connexite::Quatre);
+                Ok(etiq.vers_gris())
+            }
+            Operation::SupprimerPetits => Ok(binaire::supprimer_petits_objets(
+                &bin(),
+                self.surface_min.round() as usize,
+                Connexite::Quatre,
+            )
+            .vers_gris()),
         };
 
         match resultat {
@@ -647,6 +844,101 @@ impl App {
                         .trailing_fill(true),
                 );
             }
+            Operation::Quantifier => {
+                section(ui, &format!("Niveaux · {:.0}", self.nb_niveaux));
+                ui.add(
+                    egui::Slider::new(&mut self.nb_niveaux, 2.0..=256.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::Pixeliser | Operation::Echantillonner => {
+                section(ui, &format!("Pas · {:.0}", self.pas));
+                ui.add(
+                    egui::Slider::new(&mut self.pas, 2.0..=32.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::PasseBas | Operation::PasseHaut | Operation::Rehaussement => {
+                section(ui, &format!("Rayon · {:.0}", self.rayon_freq));
+                ui.add(
+                    egui::Slider::new(&mut self.rayon_freq, 1.0..=200.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+                if self.operation == Operation::Rehaussement {
+                    section(ui, &format!("k · {:.2}", self.k_rehausse));
+                    ui.add(
+                        egui::Slider::new(&mut self.k_rehausse, 0.1..=5.0)
+                            .show_value(false)
+                            .trailing_fill(true),
+                    );
+                }
+            }
+            Operation::PasseBande => {
+                section(ui, &format!("Rayon min · {:.0}", self.rayon_freq));
+                ui.add(
+                    egui::Slider::new(&mut self.rayon_freq, 1.0..=199.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+                if self.rayon_freq_max <= self.rayon_freq {
+                    self.rayon_freq_max = (self.rayon_freq + 1.0).min(200.0);
+                }
+                section(ui, &format!("Rayon max · {:.0}", self.rayon_freq_max));
+                ui.add(
+                    egui::Slider::new(&mut self.rayon_freq_max, (self.rayon_freq + 1.0)..=200.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::ErosionGris
+            | Operation::DilatationGris
+            | Operation::OuvertureGris
+            | Operation::FermetureGris
+            | Operation::GradientMorphoGris => {
+                section(ui, "Élément structurant");
+                for choix in [EsChoix::Croix, EsChoix::Carre3, EsChoix::Disque2] {
+                    let sel = self.es_choix == choix;
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(choix.label())
+                                    .size(12.5)
+                                    .color(if sel { ACCENT } else { TEXT }),
+                            )
+                            .fill(if sel { ACCENT_SOFT } else { SURFACE_3 })
+                            .stroke(Stroke::new(1.0, if sel { ACCENT } else { BORDER }))
+                            .corner_radius(8.0)
+                            .min_size(Vec2::new(ui.available_width(), 30.0)),
+                        )
+                        .clicked()
+                    {
+                        self.es_choix = choix;
+                    }
+                    ui.add_space(4.0);
+                }
+            }
+            Operation::SeuilBinaire
+            | Operation::CarteDistances
+            | Operation::Etiquetage
+            | Operation::SupprimerPetits => {
+                section(ui, &format!("Seuil binaire · {:.0}", self.seuil_bin));
+                ui.add(
+                    egui::Slider::new(&mut self.seuil_bin, 0.0..=255.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+                if self.operation == Operation::SupprimerPetits {
+                    section(ui, &format!("Surface min · {:.0}", self.surface_min));
+                    ui.add(
+                        egui::Slider::new(&mut self.surface_min, 1.0..=500.0)
+                            .show_value(false)
+                            .trailing_fill(true),
+                    );
+                }
+            }
             _ => {}
         }
     }
@@ -672,9 +964,9 @@ impl App {
             );
 
             let sous_titre = match self.chapitre {
-                Chapitre::Ponctuel => "comparateur avant / après",
                 Chapitre::Arithmetique if self.vue_resultat_arith => "résultat de l'opération",
                 Chapitre::Arithmetique => "images A et B côte à côte",
+                _ => "comparateur avant / après",
             };
 
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(header), |ui| {
@@ -709,7 +1001,7 @@ impl App {
                     self.ui_comparateur(ui, canvas);
                 }
                 Chapitre::Arithmetique => self.ui_duo_arithmetique(ui, canvas),
-                Chapitre::Ponctuel => {
+                _ => {
                     if self.entree.is_none() {
                         self.ui_slot(
                             ui,
@@ -1261,6 +1553,10 @@ fn fit_inside(img: Vec2, box_size: Vec2) -> Vec2 {
     let sy = box_size.y / img.y;
     let s = sx.min(sy);
     img * s
+}
+
+fn en_binaire(img: &ImageGris, seuil: u8) -> ImageBinaire {
+    img.map(|&p| p >= seuil)
 }
 
 fn stats_depuis_lib(img: &ImageGris) -> Stats {
