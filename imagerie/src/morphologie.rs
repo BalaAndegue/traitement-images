@@ -1,5 +1,6 @@
 //! Chapitre 7 (deuxième partie) : opérateurs morphologiques.
 //!
+
 //! Responsable : Nkolo Atangana Stacy Julie.
 
 // À retirer quand toutes les fonctions sont écrites.
