@@ -127,9 +127,8 @@ pub fn erosion_gris(img: &ImageGris, es: &ElementStructurant) -> ImageGris {
     ImageGris::depuis_fonction(img.largeur(), img.hauteur(), |x, y| {
         es.decalages
             .iter()
-            .map(|&(dx, dy)| {
-                img.pixel_etendu(x as isize + dx, y as isize + dy, Bord::Zero)
-                    .unwrap_or(0)
+            .filter_map(|&(dx, dy)| {
+                img.pixel_etendu(x as isize + dx, y as isize + dy, Bord::Partiel)
             })
             .min()
             .unwrap_or(0)
@@ -141,9 +140,8 @@ pub fn dilatation_gris(img: &ImageGris, es: &ElementStructurant) -> ImageGris {
     ImageGris::depuis_fonction(img.largeur(), img.hauteur(), |x, y| {
         es.decalages
             .iter()
-            .map(|&(dx, dy)| {
-                img.pixel_etendu(x as isize + dx, y as isize + dy, Bord::Zero)
-                    .unwrap_or(0)
+            .filter_map(|&(dx, dy)| {
+                img.pixel_etendu(x as isize + dx, y as isize + dy, Bord::Partiel)
             })
             .max()
             .unwrap_or(0)
