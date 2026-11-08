@@ -189,4 +189,4 @@ qui bloque.
 - Hough (Johan) prend en entrée des contours binaires : en attendant ceux de Pio,
   tester sur des images de points dessinées à la main.
 - L'hystérésis (Stacy) prend une norme de gradient (`ImageReelle`) : tester avec
-  des images réelles construites à la main, pas besoin d'attendre Pio.
+  des images réelles construites à la main, pas besoin d'attendre  Pio.
