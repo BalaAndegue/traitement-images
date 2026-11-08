@@ -158,11 +158,11 @@ Images binaires (chapitre 7) :
 - [ ] seuillage par hystérésis (fermeture des contours)
 
 Morphologie :
-- [ ] éléments structurants : croix (4-connexité), carré (8-connexité), disque, masque quelconque
-- [ ] érosion, dilatation, ouverture, fermeture
-- [ ] gradients interne, externe et morphologique
-- [ ] versions en niveaux de gris (min / max)
-- [ ] montrer sur `images/formes.pgm` l'effet de la connexité (4 contre 8) et du choix de l'élément structurant
+- [x] éléments structurants : croix (4-connexité), carré (8-connexité), disque, masque quelconque
+- [x] érosion, dilatation, ouverture, fermeture
+- [x] gradients interne, externe et morphologique
+- [x] versions en niveaux de gris (min / max)
+- [x] montrer sur `images/formes.pgm` l'effet de la connexité (4 contre 8) et du choix de l'élément structurant
 
 ---
 
