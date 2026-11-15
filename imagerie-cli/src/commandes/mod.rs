@@ -4,6 +4,7 @@ pub mod binaire;
 pub mod contours;
 pub mod filtrage;
 pub mod fourier;
+pub mod hough;
 pub mod interpolation;
 pub mod morphologie;
 pub mod ponctuel;
