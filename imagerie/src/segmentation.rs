@@ -5,7 +5,7 @@
 //! Seuillage (simple, multiple, automatique, adaptatif), k-moyennes,
 //! division-fusion et croissance de régions.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::alea::Alea;
 use crate::erreur::{Erreur, Resultat};
@@ -276,16 +276,42 @@ fn verifier_kmoyennes(k: usize, iterations_max: usize, distincts: usize) -> Resu
     Ok(())
 }
 
-/// Tire `k` indices distincts parmi `0..n` (mélange de Fisher-Yates partiel).
-fn tirer_indices(n: usize, k: usize, graine: u64) -> Vec<usize> {
+/// Choix des k centres initiaux parmi des valeurs distinctes (méthode
+/// « k-means++ ») : le premier est tiré au hasard proportionnellement au nombre de
+/// pixels, chaque suivant proportionnellement à poids x D², où D est la distance au
+/// centre déjà choisi le plus proche. Les centres partent ainsi bien écartés, même
+/// quand une grande zone en dégradé fournit la plupart des valeurs distinctes.
+fn centres_initiaux<C: Copy>(
+    valeurs: &[C],
+    poids: &[f64],
+    k: usize,
+    graine: u64,
+    distance2: impl Fn(C, C) -> f64,
+) -> Vec<C> {
     let mut alea = Alea::new(graine);
-    let mut indices: Vec<usize> = (0..n).collect();
-    for i in 0..k {
-        let j = i + alea.entier(n - i);
-        indices.swap(i, j);
+    let mut tirer = |w: &[f64]| -> usize {
+        let total: f64 = w.iter().sum();
+        let mut u = alea.uniforme() * total;
+        for (i, &wi) in w.iter().enumerate() {
+            if u < wi {
+                return i;
+            }
+            u -= wi;
+        }
+        // Arrondi : dernier indice de poids non nul.
+        w.iter().rposition(|&wi| wi > 0.0).unwrap_or(0)
+    };
+    let mut centres = vec![valeurs[tirer(poids)]];
+    let mut d2: Vec<f64> = valeurs.iter().map(|&v| distance2(v, centres[0])).collect();
+    while centres.len() < k {
+        let w: Vec<f64> = poids.iter().zip(&d2).map(|(p, d)| p * d).collect();
+        let c = valeurs[tirer(&w)];
+        centres.push(c);
+        for (d, &v) in d2.iter_mut().zip(valeurs) {
+            *d = d.min(distance2(v, c));
+        }
     }
-    indices.truncate(k);
-    indices
+    centres
 }
 
 /// k-moyennes sur l'intensité.
@@ -302,10 +328,9 @@ pub fn kmoyennes_gris(
     verifier_kmoyennes(k, iterations_max, niveaux.len())?;
 
     // Étape 1 : k niveaux distincts tirés au hasard comme centres initiaux.
-    let mut centres: Vec<f64> = tirer_indices(niveaux.len(), k, graine)
-        .into_iter()
-        .map(|i| niveaux[i] as f64)
-        .collect();
+    let valeurs: Vec<f64> = niveaux.iter().map(|&v| v as f64).collect();
+    let poids: Vec<f64> = niveaux.iter().map(|&v| h[v] as f64).collect();
+    let mut centres = centres_initiaux(&valeurs, &poids, k, graine, |a, b| (a - b) * (a - b));
     let mut groupe = [usize::MAX; 256];
     let mut iterations = 0;
     while iterations < iterations_max {
@@ -378,24 +403,23 @@ pub fn kmoyennes_couleur(
     iterations_max: usize,
     graine: u64,
 ) -> Resultat<KMoyennes<[f64; 3]>> {
-    let mut distinctes: Vec<Rvb> = img
-        .donnees()
-        .iter()
-        .copied()
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
+    let mut effectifs: HashMap<Rvb, f64> = HashMap::new();
+    for &p in img.donnees() {
+        *effectifs.entry(p).or_insert(0.0) += 1.0;
+    }
+    let mut distinctes: Vec<(Rvb, f64)> = effectifs.into_iter().collect();
     // Ordre fixe pour que la graine donne toujours le même résultat.
-    distinctes.sort_by_key(|c| (c.r, c.v, c.b));
+    distinctes.sort_by_key(|(c, _)| (c.r, c.v, c.b));
     verifier_kmoyennes(k, iterations_max, distinctes.len())?;
 
-    let mut centres: Vec<[f64; 3]> = tirer_indices(distinctes.len(), k, graine)
-        .into_iter()
-        .map(|i| {
-            let c = distinctes[i];
-            [c.r as f64, c.v as f64, c.b as f64]
-        })
+    let valeurs: Vec<[f64; 3]> = distinctes
+        .iter()
+        .map(|(c, _)| [c.r as f64, c.v as f64, c.b as f64])
         .collect();
+    let poids: Vec<f64> = distinctes.iter().map(|&(_, n)| n).collect();
+    let mut centres = centres_initiaux(&valeurs, &poids, k, graine, |a, b| {
+        (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)
+    });
     let mut groupe = vec![usize::MAX; img.nb_pixels()];
     let mut iterations = 0;
     while iterations < iterations_max {
@@ -984,6 +1008,24 @@ mod tests {
         assert_eq!(poster[(0, 0)], Rvb::new(205, 15, 10));
         assert_eq!(poster[(1, 0)], bleu);
         assert!(kmoyennes_couleur(&img, 4, 10, 7).is_err());
+    }
+
+    #[test]
+    fn kmoyennes_couleur_fond_degrade() {
+        // 30 pixels de fond tous différents (dégradé) et deux petits objets :
+        // l'initialisation doit quand même placer un centre sur chaque objet.
+        let mut px: Vec<Rvb> = (0..30).map(|i| Rvb::new(200 + i, 200, 150)).collect();
+        px.extend([Rvb::new(220, 30, 30), Rvb::new(222, 30, 30)]);
+        px.extend([Rvb::new(30, 180, 60), Rvb::new(30, 182, 60)]);
+        let img = ImageRvb::depuis_vec(34, 1, px).unwrap();
+        for graine in 0..10 {
+            let r = kmoyennes_couleur(&img, 3, 50, graine).unwrap();
+            let e = r.etiquettes.donnees();
+            assert!(e[..30].iter().all(|&v| v == e[0]), "graine {graine}");
+            assert_eq!(e[30], e[31]);
+            assert_eq!(e[32], e[33]);
+            assert!(e[0] != e[30] && e[0] != e[32] && e[30] != e[32]);
+        }
     }
 
     #[test]
