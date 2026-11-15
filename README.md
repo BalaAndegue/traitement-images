@@ -13,6 +13,7 @@ codées par nous : seuls la lecture et l'écriture des formats compressés
 - Sountsa Djiele Pio Vianney (22P572)
 - Nkamla Chedjou Johan (22P607)
 - Nkolo Atangana Stacy (22P582)
+- Tagatsing Fotsing Samuel Sean (22P215)
 
 La répartition du travail est dans [TACHES.md](TACHES.md), les règles pour
 contribuer dans [CONTRIBUER.md](CONTRIBUER.md).
