@@ -434,12 +434,6 @@ mod tests {
         ImageGris::depuis_vec(2, 2, vec![0, 100, 200, 255]).unwrap()
     }
 
-    fn img_rampe(n: usize) -> ImageGris {
-        // Ligne unique croissante 0, 1, 2, ..., n-1
-        let d: Vec<u8> = (0..n as u8).collect();
-        ImageGris::depuis_vec(n, 1, d).unwrap()
-    }
-
     // ---- agrandir_par_copie ----
 
     #[test]
@@ -582,7 +576,7 @@ mod tests {
         let ligne: Vec<f64> = (0..10).map(|i| i as f64 * 10.0).collect();
         let r = interpoler_ligne_x3_cubique(&ligne);
         for &v in &r {
-            assert!(v >= -1.0 && v <= 91.0, "valeur hors plage : {v}");
+            assert!((-1.0..=91.0).contains(&v), "valeur hors plage : {v}");
         }
     }
 
