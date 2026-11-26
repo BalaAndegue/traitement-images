@@ -249,8 +249,8 @@ pub fn interpoler_ligne_x2(ligne: &[f64], methode: Methode) -> Vec<f64> {
                     // Extrapolation parabolique au bord droit.
                     // Parabole passant par x(N-3), x(N-2), x(N-1) évaluée en N-0.5 :
                     // On utilise la formule de différences finies du 2e ordre.
-                    let xm2 = ligne[n.saturating_sub(3).max(0)];
-                    let xm1 = ligne[n.saturating_sub(2).max(0)];
+                    let xm2 = ligne[n.saturating_sub(3)];
+                    let xm1 = ligne[n.saturating_sub(2)];
                     let x0 = ligne[n - 1];
                     // Extrapolation par différences finies du 2e ordre à t=+0.5
                     x0 + 0.5 * (x0 - xm1) + 0.125 * ((x0 - xm1) - (xm1 - xm2))

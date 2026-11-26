@@ -279,10 +279,7 @@ pub fn egalisation_locale(img: &ImageGris, taille: usize) -> Resultat<ImageGris>
                 continue;
             }
             // C(centre) = somme hn(j) pour j <= centre
-            let mut cum = 0u32;
-            for v in 0..=centre as usize {
-                cum += h[v];
-            }
+            let cum: u32 = h.iter().take(centre as usize + 1).sum();
             let val = (255.0 * cum as f64 / n as f64).round().clamp(0.0, 255.0) as u8;
             *sortie.get_mut(x, y).unwrap() = val;
         }
@@ -312,7 +309,7 @@ pub fn image_histogramme(hist: &Histogramme, largeur: usize, hauteur: usize) -> 
         let bin = x * 256 / largeur;
         let h = ((*hist.get(bin).unwrap_or(&0) as f64 / max as f64) * (hauteur as f64 - 1.0))
             .round() as usize;
-        for y in (hauteur - h.max(0))..hauteur {
+        for y in (hauteur - h)..hauteur {
             if let Some(p) = img.get_mut(x, y) {
                 *p = 255;
             }
