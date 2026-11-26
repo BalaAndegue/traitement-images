@@ -1,0 +1,1974 @@
+//! Interface graphique premium (Option A) — shell type outil photo moderne.
+//!
+//! Opérations branchées sur `imagerie::ponctuel` et `imagerie::arithmetique`.
+
+mod theme;
+
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use eframe::egui::{
+    self, Color32, ColorImage, CornerRadius, Mesh, Pos2, Rect, Sense, Shape, Stroke, TextureHandle,
+    Vec2,
+};
+use imagerie::arithmetique;
+use imagerie::bases;
+use imagerie::binaire;
+use imagerie::contours::{self, Operateur};
+use imagerie::es;
+use imagerie::filtrage;
+use imagerie::fourier;
+use imagerie::hough;
+use imagerie::image::{Bord, Connexite, ImageBinaire, ImageGris, Rvb};
+use imagerie::interpolation::{self, Methode};
+use imagerie::morphologie::{self, ElementStructurant};
+use imagerie::ponctuel;
+use imagerie::segmentation::{self, Homogeneite};
+use theme::{
+    ACCENT, ACCENT_SOFT, BG, BORDER, DANGER, HIST_BOT, HIST_TOP, INSPECTOR_W, SIDEBAR_W, SUCCESS,
+    SURFACE, SURFACE_2, SURFACE_3, TEXT, TEXT_DIM, TEXT_MUTED,
+};
+
+fn main() -> eframe::Result {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1280.0, 800.0])
+            .with_min_inner_size([960.0, 600.0])
+            .with_title("Imagerie"),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Imagerie",
+        options,
+        Box::new(|cc| Ok(Box::new(App::nouvelle(cc)))),
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Chapitre {
+    Bases,
+    Ponctuel,
+    Arithmetique,
+    Interpolation,
+    Filtrage,
+    Fourier,
+    Contours,
+    Segmentation,
+    Hough,
+    Morphologie,
+    Binaire,
+}
+
+impl Chapitre {
+    fn toutes() -> &'static [Chapitre] {
+        &[
+            Self::Bases,
+            Self::Ponctuel,
+            Self::Arithmetique,
+            Self::Interpolation,
+            Self::Filtrage,
+            Self::Fourier,
+            Self::Contours,
+            Self::Segmentation,
+            Self::Hough,
+            Self::Morphologie,
+            Self::Binaire,
+        ]
+    }
+
+    fn titre(self) -> &'static str {
+        match self {
+            Self::Bases => "Bases",
+            Self::Ponctuel => "Contraste",
+            Self::Arithmetique => "Arithmétique",
+            Self::Interpolation => "Interpolation",
+            Self::Filtrage => "Filtrage",
+            Self::Fourier => "Fourier",
+            Self::Contours => "Contours",
+            Self::Segmentation => "Segmentation",
+            Self::Hough => "Hough",
+            Self::Morphologie => "Morphologie",
+            Self::Binaire => "Binaire",
+        }
+    }
+
+    fn sous_titre(self) -> &'static str {
+        match self {
+            Self::Bases => "Chapitre 1 — quantification & échantillonnage",
+            Self::Ponctuel => "Chapitre 2 — histogramme & transformations",
+            Self::Arithmetique => "Chapitre 2 — opérations sur deux images",
+            Self::Interpolation => "Chapitre 2 — zoom & rotation",
+            Self::Filtrage => "Chapitre 3 — convolution & filtres",
+            Self::Fourier => "Chapitre 4 — spectre & filtres fréquentiels",
+            Self::Contours => "Chapitre 5 — gradient & laplacien",
+            Self::Segmentation => "Chapitre 6 — seuillage & régions",
+            Self::Hough => "Chapitre 5 — transformée de Hough",
+            Self::Morphologie => "Chapitre 7 — érosion, dilatation…",
+            Self::Binaire => "Chapitre 7 — distances, étiquetage…",
+        }
+    }
+
+    fn glyphe(self) -> &'static str {
+        match self {
+            Self::Bases => "1",
+            Self::Ponctuel => "2",
+            Self::Arithmetique => "+",
+            Self::Interpolation => "Z",
+            Self::Filtrage => "3",
+            Self::Fourier => "F",
+            Self::Contours => "C",
+            Self::Segmentation => "6",
+            Self::Hough => "H",
+            Self::Morphologie => "M",
+            Self::Binaire => "B",
+        }
+    }
+
+    fn operations(self) -> &'static [Operation] {
+        match self {
+            Self::Bases => &[
+                Operation::Quantifier,
+                Operation::Pixeliser,
+                Operation::Echantillonner,
+                Operation::ProfilLigne,
+            ],
+            Self::Ponctuel => &[
+                Operation::Negatif,
+                Operation::Lineaire,
+                Operation::Saturation,
+                Operation::Gamma,
+                Operation::Log,
+                Operation::Exp,
+                Operation::Egalisation,
+                Operation::EgalisationLocale,
+            ],
+            Self::Arithmetique => &[
+                Operation::Addition,
+                Operation::Soustraction,
+                Operation::DiffAbs,
+                Operation::Multiplication,
+                Operation::Combinaison,
+                Operation::Et,
+                Operation::Ou,
+            ],
+            Self::Interpolation => &[
+                Operation::ZoomX2,
+                Operation::ZoomFacteur,
+                Operation::AgrandirCopie,
+                Operation::Rotation,
+            ],
+            Self::Filtrage => &[
+                Operation::Moyenneur,
+                Operation::Gaussien,
+                Operation::Median,
+                Operation::FiltreMin,
+                Operation::FiltreMax,
+                Operation::Rehausseur,
+                Operation::BruitPoivreSel,
+                Operation::BruitGaussien,
+            ],
+            Self::Fourier => &[
+                Operation::Spectre,
+                Operation::PasseBas,
+                Operation::PasseHaut,
+                Operation::PasseBande,
+                Operation::Rehaussement,
+            ],
+            Self::Contours => &[
+                Operation::ContoursSobel,
+                Operation::ContoursPrewitt,
+                Operation::NormeGradient,
+                Operation::LaplacienZero,
+                Operation::NonMaxima,
+            ],
+            Self::Segmentation => &[
+                Operation::SeuilFixe,
+                Operation::SeuilOtsu,
+                Operation::SeuilMoyenne,
+                Operation::SeuilMilieu,
+                Operation::SeuilMedian,
+                Operation::SeuilAdaptatif,
+                Operation::KMoyennes,
+                Operation::DivisionFusion,
+            ],
+            Self::Hough => &[Operation::HoughAccumulateur, Operation::HoughDroites],
+            Self::Morphologie => &[
+                Operation::ErosionGris,
+                Operation::DilatationGris,
+                Operation::OuvertureGris,
+                Operation::FermetureGris,
+                Operation::GradientMorphoGris,
+            ],
+            Self::Binaire => &[
+                Operation::SeuilBinaire,
+                Operation::CarteDistances,
+                Operation::Etiquetage,
+                Operation::SupprimerPetits,
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Operation {
+    // Bases
+    Quantifier,
+    Pixeliser,
+    Echantillonner,
+    ProfilLigne,
+    // Ponctuel
+    Negatif,
+    Lineaire,
+    Saturation,
+    Gamma,
+    Log,
+    Exp,
+    Egalisation,
+    EgalisationLocale,
+    // Arithmétique
+    Addition,
+    Soustraction,
+    DiffAbs,
+    Multiplication,
+    Combinaison,
+    Et,
+    Ou,
+    // Interpolation
+    ZoomX2,
+    ZoomFacteur,
+    AgrandirCopie,
+    Rotation,
+    // Filtrage
+    Moyenneur,
+    Gaussien,
+    Median,
+    FiltreMin,
+    FiltreMax,
+    Rehausseur,
+    BruitPoivreSel,
+    BruitGaussien,
+    // Fourier
+    Spectre,
+    PasseBas,
+    PasseHaut,
+    PasseBande,
+    Rehaussement,
+    // Contours
+    ContoursSobel,
+    ContoursPrewitt,
+    NormeGradient,
+    LaplacienZero,
+    NonMaxima,
+    // Segmentation
+    SeuilFixe,
+    SeuilOtsu,
+    SeuilMoyenne,
+    SeuilMilieu,
+    SeuilMedian,
+    SeuilAdaptatif,
+    KMoyennes,
+    DivisionFusion,
+    // Hough
+    HoughAccumulateur,
+    HoughDroites,
+    // Morphologie
+    ErosionGris,
+    DilatationGris,
+    OuvertureGris,
+    FermetureGris,
+    GradientMorphoGris,
+    // Binaire
+    SeuilBinaire,
+    CarteDistances,
+    Etiquetage,
+    SupprimerPetits,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EsChoix {
+    Croix,
+    Carre3,
+    Disque2,
+}
+
+impl EsChoix {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Croix => "Croix (4)",
+            Self::Carre3 => "Carré 3×3",
+            Self::Disque2 => "Disque r=2",
+        }
+    }
+
+    fn element(self) -> ElementStructurant {
+        match self {
+            Self::Croix => ElementStructurant::croix(),
+            Self::Carre3 => ElementStructurant::carre(3).expect("3 est impair"),
+            Self::Disque2 => ElementStructurant::disque(2),
+        }
+    }
+}
+
+impl Operation {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Quantifier => "Quantification",
+            Self::Pixeliser => "Pixelisation",
+            Self::Echantillonner => "Échantillonnage",
+            Self::ProfilLigne => "Profil (ligne milieu)",
+            Self::Negatif => "Négatif",
+            Self::Lineaire => "Étirement linéaire",
+            Self::Saturation => "Linéaire + saturation",
+            Self::Gamma => "Correction gamma",
+            Self::Log => "Logarithme",
+            Self::Exp => "Exponentielle",
+            Self::Egalisation => "Égalisation",
+            Self::EgalisationLocale => "Égalisation locale 7×7",
+            Self::Addition => "Addition",
+            Self::Soustraction => "Soustraction",
+            Self::DiffAbs => "Différence absolue",
+            Self::Multiplication => "Multiplication",
+            Self::Combinaison => "Combinaison linéaire",
+            Self::Et => "ET bit à bit",
+            Self::Ou => "OU bit à bit",
+            Self::ZoomX2 => "Zoom ×2",
+            Self::ZoomFacteur => "Zoom (facteur)",
+            Self::AgrandirCopie => "Agrandir par copie",
+            Self::Rotation => "Rotation",
+            Self::Moyenneur => "Moyenneur",
+            Self::Gaussien => "Gaussien",
+            Self::Median => "Médian",
+            Self::FiltreMin => "Minimum",
+            Self::FiltreMax => "Maximum",
+            Self::Rehausseur => "Rehausseur",
+            Self::BruitPoivreSel => "Bruit poivre & sel",
+            Self::BruitGaussien => "Bruit gaussien",
+            Self::Spectre => "Spectre FFT",
+            Self::PasseBas => "Passe-bas",
+            Self::PasseHaut => "Passe-haut",
+            Self::PasseBande => "Passe-bande",
+            Self::Rehaussement => "Rehaussement",
+            Self::ContoursSobel => "Contours Sobel",
+            Self::ContoursPrewitt => "Contours Prewitt",
+            Self::NormeGradient => "Norme du gradient",
+            Self::LaplacienZero => "Laplacien (zéros)",
+            Self::NonMaxima => "Non-maxima",
+            Self::SeuilFixe => "Seuil fixe",
+            Self::SeuilOtsu => "Otsu",
+            Self::SeuilMoyenne => "Seuil moyenne",
+            Self::SeuilMilieu => "Seuil milieu",
+            Self::SeuilMedian => "Seuil médiane",
+            Self::SeuilAdaptatif => "Seuil adaptatif",
+            Self::KMoyennes => "k-moyennes",
+            Self::DivisionFusion => "Division-fusion",
+            Self::HoughAccumulateur => "Accumulateur",
+            Self::HoughDroites => "Droites détectées",
+            Self::ErosionGris => "Érosion (gris)",
+            Self::DilatationGris => "Dilatation (gris)",
+            Self::OuvertureGris => "Ouverture (gris)",
+            Self::FermetureGris => "Fermeture (gris)",
+            Self::GradientMorphoGris => "Gradient morpho",
+            Self::SeuilBinaire => "Seuillage binaire",
+            Self::CarteDistances => "Carte des distances",
+            Self::Etiquetage => "Étiquetage",
+            Self::SupprimerPetits => "Supprimer petits objets",
+        }
+    }
+
+    fn besoin_image_b(self) -> bool {
+        matches!(
+            self,
+            Self::Addition
+                | Self::Soustraction
+                | Self::DiffAbs
+                | Self::Combinaison
+                | Self::Et
+                | Self::Ou
+        )
+    }
+}
+
+#[derive(Clone)]
+struct Toast {
+    texte: String,
+    ok: bool,
+    cree: Instant,
+}
+
+struct Stats {
+    min: u8,
+    max: u8,
+    moyenne: f32,
+}
+
+struct App {
+    chapitre: Chapitre,
+    operation: Operation,
+    s_min: f32,
+    s_max: f32,
+    gamma: f32,
+    ratio: f32,
+    alpha: f32,
+    nb_niveaux: f32,
+    pas: f32,
+    rayon_freq: f32,
+    rayon_freq_max: f32,
+    k_rehausse: f32,
+    seuil_bin: f32,
+    surface_min: f32,
+    es_choix: EsChoix,
+    taille_filtre: f32,
+    sigma_filtre: f32,
+    proportion_bruit: f32,
+    sigma_bruit: f32,
+    seuil_contour: f32,
+    facteur_zoom: f32,
+    angle_rot: f32,
+    methode_interp: Methode,
+    k_clusters: f32,
+    taille_bloc: f32,
+    nb_droites: f32,
+    chemin: Option<PathBuf>,
+    chemin_b: Option<PathBuf>,
+    entree: Option<ImageGris>,
+    entree_b: Option<ImageGris>,
+    sortie: Option<ImageGris>,
+    tex_entree: Option<TextureHandle>,
+    tex_entree_b: Option<TextureHandle>,
+    tex_sortie: Option<TextureHandle>,
+    hist_entree: ponctuel::Histogramme,
+    hist_sortie: ponctuel::Histogramme,
+    stats_entree: Option<Stats>,
+    stats_sortie: Option<Stats>,
+    /// 0 = tout entrée, 1 = tout sortie
+    split: f32,
+    anim_split: f32,
+    toast: Option<Toast>,
+    hover_drop: bool,
+    /// En arithmétique : quelle case reçoit le drag (A ou B).
+    drop_slot_b: bool,
+    /// En arithmétique : afficher le résultat au lieu de A|B.
+    vue_resultat_arith: bool,
+    pulse: f32,
+}
+
+impl App {
+    fn nouvelle(cc: &eframe::CreationContext<'_>) -> Self {
+        theme::appliquer(&cc.egui_ctx);
+        Self {
+            chapitre: Chapitre::Ponctuel,
+            operation: Operation::Negatif,
+            s_min: 40.0,
+            s_max: 200.0,
+            gamma: 1.0,
+            ratio: 1.2,
+            alpha: 0.5,
+            nb_niveaux: 8.0,
+            pas: 4.0,
+            rayon_freq: 30.0,
+            rayon_freq_max: 80.0,
+            k_rehausse: 1.5,
+            seuil_bin: 128.0,
+            surface_min: 50.0,
+            es_choix: EsChoix::Croix,
+            taille_filtre: 3.0,
+            sigma_filtre: 1.0,
+            proportion_bruit: 0.05,
+            sigma_bruit: 20.0,
+            seuil_contour: 60.0,
+            facteur_zoom: 2.0,
+            angle_rot: 45.0,
+            methode_interp: Methode::Bilineaire,
+            k_clusters: 3.0,
+            taille_bloc: 32.0,
+            nb_droites: 5.0,
+            chemin: None,
+            chemin_b: None,
+            entree: None,
+            entree_b: None,
+            sortie: None,
+            tex_entree: None,
+            tex_entree_b: None,
+            tex_sortie: None,
+            hist_entree: [0; 256],
+            hist_sortie: [0; 256],
+            stats_entree: None,
+            stats_sortie: None,
+            split: 0.5,
+            anim_split: 0.5,
+            toast: None,
+            hover_drop: false,
+            drop_slot_b: false,
+            vue_resultat_arith: false,
+            pulse: 0.0,
+        }
+    }
+
+    fn toast(&mut self, texte: impl Into<String>, ok: bool) {
+        self.toast = Some(Toast {
+            texte: texte.into(),
+            ok,
+            cree: Instant::now(),
+        });
+    }
+
+    fn charger_chemin(&mut self, ctx: &egui::Context, chemin: PathBuf) {
+        match es::charger_gris(&chemin) {
+            Ok(img) => {
+                let (l, h) = img.dimensions();
+                self.hist_entree = ponctuel::histogramme(&img);
+                self.stats_entree = Some(stats_depuis_lib(&img));
+                self.tex_entree = Some(texture_depuis_gris(ctx, "entree", &img));
+                self.entree = Some(img);
+                self.sortie = None;
+                self.tex_sortie = None;
+                self.hist_sortie = [0; 256];
+                self.stats_sortie = None;
+                self.split = 0.5;
+                self.anim_split = 0.5;
+                self.chemin = Some(chemin);
+                self.toast(format!("Image A chargée · {l}×{h}"), true);
+            }
+            Err(e) => self.toast(format!("Impossible de lire le fichier : {e}"), false),
+        }
+    }
+
+    fn charger_chemin_b(&mut self, ctx: &egui::Context, chemin: PathBuf) {
+        match es::charger_gris(&chemin) {
+            Ok(img) => {
+                let (l, h) = img.dimensions();
+                self.tex_entree_b = Some(texture_depuis_gris(ctx, "entree_b", &img));
+                self.entree_b = Some(img);
+                self.chemin_b = Some(chemin);
+                self.toast(format!("Image B chargée · {l}×{h}"), true);
+            }
+            Err(e) => self.toast(format!("Impossible de lire l'image B : {e}"), false),
+        }
+    }
+
+    fn dialogue_ouvrir(secondaire: bool) -> Option<PathBuf> {
+        let mut dialog = rfd::FileDialog::new()
+            .add_filter("Images", &["pgm", "ppm", "png", "jpg", "jpeg", "bmp"]);
+        if Path::new("images").is_dir() {
+            dialog = dialog.set_directory("images");
+        }
+        let _ = secondaire;
+        dialog.pick_file()
+    }
+
+    fn ouvrir_dialogue(&mut self, ctx: &egui::Context) {
+        if let Some(chemin) = Self::dialogue_ouvrir(false) {
+            self.charger_chemin(ctx, chemin);
+        }
+    }
+
+    fn ouvrir_dialogue_b(&mut self, ctx: &egui::Context) {
+        if let Some(chemin) = Self::dialogue_ouvrir(true) {
+            self.charger_chemin_b(ctx, chemin);
+        }
+    }
+
+    fn sync_operations(&mut self) {
+        if !self.chapitre.operations().contains(&self.operation) {
+            self.operation = self.chapitre.operations()[0];
+        }
+    }
+
+    fn appliquer(&mut self, ctx: &egui::Context) {
+        let Some(entree) = self.entree.clone() else {
+            self.toast("Ouvre d’abord une image A", false);
+            return;
+        };
+
+        if self.operation.besoin_image_b() && self.entree_b.is_none() {
+            self.toast("Cette opération nécessite une image B", false);
+            return;
+        }
+
+        let pas = self.pas.round().max(1.0) as usize;
+        let niveaux = self.nb_niveaux.round().clamp(2.0, 256.0) as u16;
+        let rayon = self.rayon_freq as f64;
+        let rayon_max = self.rayon_freq_max as f64;
+        let seuil = self.seuil_bin.round().clamp(0.0, 255.0) as u8;
+        let es = self.es_choix.element();
+        let bin = || en_binaire(&entree, seuil);
+
+        let resultat = match self.operation {
+            // Bases
+            Operation::Quantifier => bases::quantifier(&entree, niveaux),
+            Operation::Pixeliser => bases::pixeliser(&entree, pas),
+            Operation::Echantillonner => bases::echantillonner(&entree, pas),
+            Operation::ProfilLigne => {
+                let y = entree.hauteur() / 2;
+                let profil = bases::profil_ligne(&entree, y);
+                Ok(bases::image_profil(&profil, 128))
+            }
+            // Ponctuel
+            Operation::Negatif => Ok(ponctuel::negatif(&entree)),
+            Operation::Lineaire => Ok(ponctuel::transformation_lineaire(&entree)),
+            Operation::Saturation => ponctuel::transformation_lineaire_saturation(
+                &entree,
+                self.s_min.round().clamp(0.0, 255.0) as u8,
+                self.s_max.round().clamp(0.0, 255.0) as u8,
+            ),
+            Operation::Gamma => ponctuel::correction_gamma(&entree, self.gamma as f64),
+            Operation::Log => Ok(ponctuel::transformation_log(&entree)),
+            Operation::Exp => Ok(ponctuel::transformation_exp(&entree)),
+            Operation::Egalisation => Ok(ponctuel::egalisation_histogramme(&entree)),
+            Operation::EgalisationLocale => ponctuel::egalisation_locale(&entree, 7),
+            // Arithmétique
+            Operation::Multiplication => arithmetique::multiplication(&entree, self.ratio as f64),
+            Operation::Addition => arithmetique::addition(&entree, self.entree_b.as_ref().unwrap()),
+            Operation::Soustraction => {
+                arithmetique::soustraction(&entree, self.entree_b.as_ref().unwrap())
+            }
+            Operation::DiffAbs => {
+                arithmetique::difference_absolue(&entree, self.entree_b.as_ref().unwrap())
+            }
+            Operation::Combinaison => arithmetique::combinaison_lineaire(
+                &entree,
+                self.entree_b.as_ref().unwrap(),
+                self.alpha as f64,
+            ),
+            Operation::Et => arithmetique::et(&entree, self.entree_b.as_ref().unwrap()),
+            Operation::Ou => arithmetique::ou(&entree, self.entree_b.as_ref().unwrap()),
+            // Fourier
+            Operation::Spectre => {
+                let spectre = fourier::fft_2d(&entree);
+                Ok(fourier::spectre_affichable(&spectre))
+            }
+            Operation::PasseBas => Ok(fourier::passe_bas(&entree, rayon)),
+            Operation::PasseHaut => Ok(fourier::passe_haut(&entree, rayon)),
+            Operation::PasseBande => fourier::passe_bande(&entree, rayon, rayon_max),
+            Operation::Rehaussement => Ok(fourier::rehaussement(
+                &entree,
+                rayon,
+                self.k_rehausse as f64,
+            )),
+            // Interpolation
+            Operation::ZoomX2 => Ok(interpolation::zoom_x2_separable(
+                &entree,
+                self.methode_interp,
+            )),
+            Operation::ZoomFacteur => {
+                interpolation::zoom(&entree, self.facteur_zoom as f64, self.methode_interp)
+            }
+            Operation::AgrandirCopie => interpolation::agrandir_par_copie(
+                &entree,
+                self.facteur_zoom.round().max(2.0) as usize,
+            ),
+            Operation::Rotation => Ok(interpolation::rotation(
+                &entree,
+                self.angle_rot as f64,
+                self.methode_interp,
+            )),
+            // Filtrage
+            Operation::Moyenneur => {
+                let t = impair(self.taille_filtre);
+                filtrage::filtre_moyenneur(&entree, t, Bord::Replique)
+            }
+            Operation::Gaussien => {
+                let t = impair(self.taille_filtre);
+                filtrage::filtre_gaussien(&entree, t, self.sigma_filtre as f64, Bord::Replique)
+            }
+            Operation::Median => {
+                let t = impair(self.taille_filtre);
+                filtrage::filtre_median(&entree, t, Bord::Replique)
+            }
+            Operation::FiltreMin => {
+                let t = impair(self.taille_filtre);
+                filtrage::filtre_min(&entree, t, Bord::Replique)
+            }
+            Operation::FiltreMax => {
+                let t = impair(self.taille_filtre);
+                filtrage::filtre_max(&entree, t, Bord::Replique)
+            }
+            Operation::Rehausseur => Ok(filtrage::filtre_rehausseur(&entree, Bord::Replique)),
+            Operation::BruitPoivreSel => {
+                filtrage::bruit_poivre_sel(&entree, self.proportion_bruit as f64, 42)
+            }
+            Operation::BruitGaussien => Ok(filtrage::bruit_gaussien(
+                &entree,
+                self.sigma_bruit as f64,
+                42,
+            )),
+            // Contours
+            Operation::ContoursSobel => Ok(contours::contours_gradient(
+                &entree,
+                Operateur::Sobel,
+                self.seuil_contour as f64,
+            )
+            .vers_gris()),
+            Operation::ContoursPrewitt => Ok(contours::contours_gradient(
+                &entree,
+                Operateur::Prewitt,
+                self.seuil_contour as f64,
+            )
+            .vers_gris()),
+            Operation::NormeGradient => {
+                let g = contours::gradient(&entree, Operateur::Sobel, Bord::Replique);
+                Ok(g.norme().vers_gris_normalise())
+            }
+            Operation::LaplacienZero => {
+                let lap = contours::laplacien(&entree, contours::Laplacien::Quatre, Bord::Replique);
+                Ok(contours::passages_par_zero(&lap, self.seuil_contour as f64).vers_gris())
+            }
+            Operation::NonMaxima => {
+                let g = contours::gradient(&entree, Operateur::Sobel, Bord::Replique);
+                Ok(contours::suppression_non_maxima(&g).vers_gris_normalise())
+            }
+            // Segmentation
+            Operation::SeuilFixe => Ok(segmentation::seuillage(&entree, seuil).vers_gris()),
+            Operation::SeuilOtsu => {
+                let t = segmentation::seuil_otsu(&entree);
+                Ok(segmentation::seuillage(&entree, t).vers_gris())
+            }
+            Operation::SeuilMoyenne => {
+                let t = segmentation::seuil_moyenne(&entree);
+                Ok(segmentation::seuillage(&entree, t).vers_gris())
+            }
+            Operation::SeuilMilieu => {
+                let t = segmentation::seuil_milieu(&entree);
+                Ok(segmentation::seuillage(&entree, t).vers_gris())
+            }
+            Operation::SeuilMedian => {
+                let t = segmentation::seuil_median(&entree);
+                Ok(segmentation::seuillage(&entree, t).vers_gris())
+            }
+            Operation::SeuilAdaptatif => segmentation::seuillage_adaptatif(
+                &entree,
+                self.taille_bloc.round().max(2.0) as usize,
+                100.0,
+            )
+            .map(|b| b.vers_gris()),
+            Operation::KMoyennes => {
+                let k = self.k_clusters.round().clamp(2.0, 12.0) as usize;
+                segmentation::kmoyennes_gris(&entree, k, 20, 1).map(|r| r.etiquettes.vers_gris())
+            }
+            Operation::DivisionFusion => {
+                segmentation::division_fusion(&entree, Homogeneite::Variance(100.0), 8)
+                    .map(|e| e.vers_gris())
+            }
+            // Hough
+            Operation::HoughAccumulateur => {
+                let c = contours::contours_gradient(
+                    &entree,
+                    Operateur::Sobel,
+                    self.seuil_contour as f64,
+                );
+                let acc = hough::hough_droites(&c, 1.0, 1.0);
+                Ok(acc.affichable())
+            }
+            Operation::HoughDroites => {
+                let c = contours::contours_gradient(
+                    &entree,
+                    Operateur::Sobel,
+                    self.seuil_contour as f64,
+                );
+                let acc = hough::hough_droites(&c, 1.0, 1.0);
+                let pics = acc.pics(self.nb_droites.round().max(1.0) as usize, 10);
+                let rvb = hough::tracer_droites(&entree, &pics, Rvb::new(255, 60, 60));
+                Ok(bases::vers_gris(&rvb))
+            }
+            // Morphologie
+            Operation::ErosionGris => Ok(morphologie::erosion_gris(&entree, &es)),
+            Operation::DilatationGris => Ok(morphologie::dilatation_gris(&entree, &es)),
+            Operation::OuvertureGris => Ok(morphologie::ouverture_gris(&entree, &es)),
+            Operation::FermetureGris => Ok(morphologie::fermeture_gris(&entree, &es)),
+            Operation::GradientMorphoGris => {
+                Ok(morphologie::gradient_morphologique_gris(&entree, &es))
+            }
+            // Binaire
+            Operation::SeuilBinaire => Ok(bin().vers_gris()),
+            Operation::CarteDistances => {
+                let carte = binaire::carte_distances(&bin(), binaire::Distance::D4);
+                let max = carte
+                    .donnees()
+                    .iter()
+                    .copied()
+                    .filter(|&v| v < u32::MAX)
+                    .max()
+                    .unwrap_or(1)
+                    .max(1);
+                Ok(carte.map(|&v| {
+                    if v == u32::MAX {
+                        255
+                    } else {
+                        ((255.0 * v as f64) / max as f64).round() as u8
+                    }
+                }))
+            }
+            Operation::Etiquetage => {
+                let (etiq, _) = binaire::etiqueter(&bin(), Connexite::Quatre);
+                Ok(etiq.vers_gris())
+            }
+            Operation::SupprimerPetits => Ok(binaire::supprimer_petits_objets(
+                &bin(),
+                self.surface_min.round() as usize,
+                Connexite::Quatre,
+            )
+            .vers_gris()),
+        };
+
+        match resultat {
+            Ok(resultat) => {
+                self.hist_sortie = ponctuel::histogramme(&resultat);
+                self.stats_sortie = Some(stats_depuis_lib(&resultat));
+                self.tex_sortie = Some(texture_depuis_gris(ctx, "sortie", &resultat));
+                self.sortie = Some(resultat);
+                self.split = 0.55;
+                if self.chapitre == Chapitre::Arithmetique {
+                    self.vue_resultat_arith = true;
+                }
+                self.toast(format!("{} appliqué", self.operation.label()), true);
+            }
+            Err(e) => self.toast(format!("{e}"), false),
+        }
+    }
+
+    fn consommer_drop(&mut self, ctx: &egui::Context) {
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .filter_map(|f| f.path.clone())
+                .collect()
+        });
+        self.hover_drop = ctx.input(|i| !i.raw.hovered_files.is_empty());
+        if let Some(chemin) = dropped.into_iter().next() {
+            if self.chapitre == Chapitre::Arithmetique && self.drop_slot_b {
+                self.charger_chemin_b(ctx, chemin);
+            } else {
+                self.charger_chemin(ctx, chemin);
+            }
+        }
+    }
+
+    fn peut_appliquer(&self) -> bool {
+        self.entree.is_some() && (!self.operation.besoin_image_b() || self.entree_b.is_some())
+    }
+}
+
+impl eframe::App for App {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.consommer_drop(ctx);
+        self.sync_operations();
+
+        let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.05);
+        self.anim_split += (self.split - self.anim_split) * (1.0 - (-12.0 * dt).exp());
+        self.pulse = (self.pulse + dt * 2.2) % std::f32::consts::TAU;
+        if self.toast.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        if (self.anim_split - self.split).abs() > 0.001 {
+            ctx.request_repaint();
+        }
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(BG).inner_margin(0.0))
+            .show(ctx, |ui| {
+                let full = ui.available_rect_before_wrap();
+
+                // Sidebar
+                let side = Rect::from_min_size(full.min, Vec2::new(SIDEBAR_W, full.height()));
+                self.ui_sidebar(ui, side);
+
+                // Inspector
+                let insp =
+                    Rect::from_min_max(Pos2::new(full.max.x - INSPECTOR_W, full.min.y), full.max);
+                self.ui_inspector(ui, insp);
+
+                // Main
+                let main = Rect::from_min_max(
+                    Pos2::new(side.max.x, full.min.y),
+                    Pos2::new(insp.min.x, full.max.y),
+                );
+                self.ui_main(ui, main);
+
+                self.ui_toast(ui, full);
+            });
+    }
+}
+
+impl App {
+    fn ui_sidebar(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            ui.painter().rect_filled(rect, 0.0, SURFACE);
+            ui.painter().line_segment(
+                [
+                    Pos2::new(rect.max.x, rect.min.y),
+                    Pos2::new(rect.max.x, rect.max.y),
+                ],
+                Stroke::new(1.0, BORDER),
+            );
+
+            ui.vertical_centered(|ui| {
+                ui.add_space(18.0);
+                ui.label(egui::RichText::new("Im").size(22.0).color(ACCENT).strong());
+                ui.add_space(20.0);
+
+                for c in Chapitre::toutes() {
+                    let selected = self.chapitre == *c;
+                    let resp = nav_bouton(ui, c.glyphe(), c.titre(), selected);
+                    if resp.clicked() {
+                        self.chapitre = *c;
+                    }
+                    ui.add_space(6.0);
+                }
+
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    ui.add_space(16.0);
+                    let open = nav_bouton(ui, "+", "Ouvrir", false);
+                    if open.clicked() {
+                        self.ouvrir_dialogue(ui.ctx());
+                    }
+                });
+            });
+        });
+    }
+
+    fn ui_inspector(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            ui.painter().rect_filled(rect, 0.0, SURFACE);
+            ui.painter().line_segment(
+                [
+                    Pos2::new(rect.min.x, rect.min.y),
+                    Pos2::new(rect.min.x, rect.max.y),
+                ],
+                Stroke::new(1.0, BORDER),
+            );
+
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect.shrink(14.0)), |ui| {
+                ui.label(
+                    egui::RichText::new(self.chapitre.titre())
+                        .size(20.0)
+                        .color(TEXT)
+                        .strong(),
+                );
+                ui.label(
+                    egui::RichText::new(self.chapitre.sous_titre())
+                        .size(12.0)
+                        .color(TEXT_MUTED),
+                );
+                ui.add_space(12.0);
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        section(ui, "Opération");
+                        for op in self.chapitre.operations() {
+                            op_choix(ui, &mut self.operation, *op);
+                        }
+
+                        ui.add_space(8.0);
+                        self.ui_parametres(ui);
+
+                        if self.operation.besoin_image_b() {
+                            ui.add_space(12.0);
+                            section(ui, "Image B");
+                            let nom_b = self
+                                .chemin_b
+                                .as_ref()
+                                .and_then(|p| p.file_name()?.to_str().map(str::to_owned))
+                                .unwrap_or_else(|| "aucune".into());
+                            ui.label(egui::RichText::new(nom_b).size(12.5).color(TEXT_DIM));
+                            ui.add_space(6.0);
+                            if ui
+                                .add(
+                                    egui::Button::new("Charger l'image B…")
+                                        .fill(SURFACE_3)
+                                        .stroke(Stroke::new(1.0, BORDER))
+                                        .corner_radius(8.0)
+                                        .min_size(Vec2::new(ui.available_width(), 32.0)),
+                                )
+                                .clicked()
+                            {
+                                self.ouvrir_dialogue_b(ui.ctx());
+                            }
+                        }
+
+                        ui.add_space(16.0);
+                        let peut = self.peut_appliquer();
+                        let apply = ui.add_enabled(
+                            peut,
+                            egui::Button::new(
+                                egui::RichText::new("Appliquer")
+                                    .size(14.0)
+                                    .color(if peut { BG } else { TEXT_MUTED })
+                                    .strong(),
+                            )
+                            .fill(if peut { ACCENT } else { SURFACE_3 })
+                            .corner_radius(10.0)
+                            .min_size(Vec2::new(ui.available_width(), 40.0)),
+                        );
+                        if apply.clicked() {
+                            self.appliquer(ui.ctx());
+                        }
+
+                        ui.add_space(8.0);
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Ouvrir image A…")
+                                        .size(13.0)
+                                        .color(TEXT),
+                                )
+                                .fill(SURFACE_3)
+                                .stroke(Stroke::new(1.0, BORDER))
+                                .corner_radius(10.0)
+                                .min_size(Vec2::new(ui.available_width(), 36.0)),
+                            )
+                            .clicked()
+                        {
+                            self.ouvrir_dialogue(ui.ctx());
+                        }
+
+                        if let Some(chemin) = &self.chemin {
+                            ui.add_space(14.0);
+                            section(ui, "Fichier A");
+                            ui.label(
+                                egui::RichText::new(
+                                    chemin.file_name().and_then(|s| s.to_str()).unwrap_or("—"),
+                                )
+                                .size(13.0)
+                                .color(TEXT_DIM),
+                            );
+                        }
+
+                        ui.add_space(16.0);
+                        section(ui, "Statistiques");
+                        if let Some(s) = &self.stats_entree {
+                            stats_ligne(ui, "Entrée", s);
+                        } else {
+                            ui.label(
+                                egui::RichText::new("Aucune image")
+                                    .size(12.0)
+                                    .color(TEXT_MUTED),
+                            );
+                        }
+                        if let Some(s) = &self.stats_sortie {
+                            ui.add_space(6.0);
+                            stats_ligne(ui, "Sortie", s);
+                        }
+
+                        ui.add_space(16.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Branché sur ponctuel & arithmetique\n(tes modules Jeff).",
+                            )
+                            .size(11.0)
+                            .color(TEXT_MUTED),
+                        );
+                    });
+            });
+        });
+    }
+
+    fn ui_parametres(&mut self, ui: &mut egui::Ui) {
+        match self.operation {
+            Operation::Saturation => {
+                section(ui, &format!("Smin · {:.0}", self.s_min));
+                ui.add(
+                    egui::Slider::new(&mut self.s_min, 0.0..=254.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+                if self.s_max <= self.s_min {
+                    self.s_max = (self.s_min + 1.0).min(255.0);
+                }
+                section(ui, &format!("Smax · {:.0}", self.s_max));
+                ui.add(
+                    egui::Slider::new(&mut self.s_max, (self.s_min + 1.0)..=255.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::Gamma => {
+                section(ui, &format!("γ · {:.2}", self.gamma));
+                ui.add(
+                    egui::Slider::new(&mut self.gamma, 0.1..=3.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::Multiplication => {
+                section(ui, &format!("Ratio · {:.2}", self.ratio));
+                ui.add(
+                    egui::Slider::new(&mut self.ratio, 0.0..=3.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::Combinaison => {
+                section(ui, &format!("α · {:.2}", self.alpha));
+                ui.add(
+                    egui::Slider::new(&mut self.alpha, 0.0..=1.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::Quantifier => {
+                section(ui, &format!("Niveaux · {:.0}", self.nb_niveaux));
+                ui.add(
+                    egui::Slider::new(&mut self.nb_niveaux, 2.0..=256.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::Pixeliser | Operation::Echantillonner => {
+                section(ui, &format!("Pas · {:.0}", self.pas));
+                ui.add(
+                    egui::Slider::new(&mut self.pas, 2.0..=32.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::PasseBas | Operation::PasseHaut | Operation::Rehaussement => {
+                section(ui, &format!("Rayon · {:.0}", self.rayon_freq));
+                ui.add(
+                    egui::Slider::new(&mut self.rayon_freq, 1.0..=200.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+                if self.operation == Operation::Rehaussement {
+                    section(ui, &format!("k · {:.2}", self.k_rehausse));
+                    ui.add(
+                        egui::Slider::new(&mut self.k_rehausse, 0.1..=5.0)
+                            .show_value(false)
+                            .trailing_fill(true),
+                    );
+                }
+            }
+            Operation::PasseBande => {
+                section(ui, &format!("Rayon min · {:.0}", self.rayon_freq));
+                ui.add(
+                    egui::Slider::new(&mut self.rayon_freq, 1.0..=199.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+                if self.rayon_freq_max <= self.rayon_freq {
+                    self.rayon_freq_max = (self.rayon_freq + 1.0).min(200.0);
+                }
+                section(ui, &format!("Rayon max · {:.0}", self.rayon_freq_max));
+                ui.add(
+                    egui::Slider::new(&mut self.rayon_freq_max, (self.rayon_freq + 1.0)..=200.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::ErosionGris
+            | Operation::DilatationGris
+            | Operation::OuvertureGris
+            | Operation::FermetureGris
+            | Operation::GradientMorphoGris => {
+                section(ui, "Élément structurant");
+                for choix in [EsChoix::Croix, EsChoix::Carre3, EsChoix::Disque2] {
+                    let sel = self.es_choix == choix;
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(choix.label()).size(12.5).color(if sel {
+                                    ACCENT
+                                } else {
+                                    TEXT
+                                }),
+                            )
+                            .fill(if sel { ACCENT_SOFT } else { SURFACE_3 })
+                            .stroke(Stroke::new(1.0, if sel { ACCENT } else { BORDER }))
+                            .corner_radius(8.0)
+                            .min_size(Vec2::new(ui.available_width(), 30.0)),
+                        )
+                        .clicked()
+                    {
+                        self.es_choix = choix;
+                    }
+                    ui.add_space(4.0);
+                }
+            }
+            Operation::SeuilBinaire
+            | Operation::CarteDistances
+            | Operation::Etiquetage
+            | Operation::SupprimerPetits => {
+                section(ui, &format!("Seuil binaire · {:.0}", self.seuil_bin));
+                ui.add(
+                    egui::Slider::new(&mut self.seuil_bin, 0.0..=255.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+                if self.operation == Operation::SupprimerPetits {
+                    section(ui, &format!("Surface min · {:.0}", self.surface_min));
+                    ui.add(
+                        egui::Slider::new(&mut self.surface_min, 1.0..=500.0)
+                            .show_value(false)
+                            .trailing_fill(true),
+                    );
+                }
+            }
+            Operation::Moyenneur
+            | Operation::Gaussien
+            | Operation::Median
+            | Operation::FiltreMin
+            | Operation::FiltreMax => {
+                section(ui, &format!("Taille · {:.0}", self.taille_filtre));
+                ui.add(
+                    egui::Slider::new(&mut self.taille_filtre, 3.0..=15.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+                if self.operation == Operation::Gaussien {
+                    section(ui, &format!("σ · {:.2}", self.sigma_filtre));
+                    ui.add(
+                        egui::Slider::new(&mut self.sigma_filtre, 0.3..=5.0)
+                            .show_value(false)
+                            .trailing_fill(true),
+                    );
+                }
+            }
+            Operation::BruitPoivreSel => {
+                section(ui, &format!("Proportion · {:.2}", self.proportion_bruit));
+                ui.add(
+                    egui::Slider::new(&mut self.proportion_bruit, 0.01..=0.4)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::BruitGaussien => {
+                section(ui, &format!("σ · {:.0}", self.sigma_bruit));
+                ui.add(
+                    egui::Slider::new(&mut self.sigma_bruit, 1.0..=80.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::ContoursSobel
+            | Operation::ContoursPrewitt
+            | Operation::LaplacienZero
+            | Operation::HoughAccumulateur
+            | Operation::HoughDroites => {
+                section(ui, &format!("Seuil contours · {:.0}", self.seuil_contour));
+                ui.add(
+                    egui::Slider::new(&mut self.seuil_contour, 5.0..=200.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+                if self.operation == Operation::HoughDroites {
+                    section(ui, &format!("Nb droites · {:.0}", self.nb_droites));
+                    ui.add(
+                        egui::Slider::new(&mut self.nb_droites, 1.0..=20.0)
+                            .show_value(false)
+                            .trailing_fill(true),
+                    );
+                }
+            }
+            Operation::ZoomX2
+            | Operation::ZoomFacteur
+            | Operation::AgrandirCopie
+            | Operation::Rotation => {
+                section(ui, "Méthode");
+                for m in [
+                    Methode::PlusProcheVoisin,
+                    Methode::Bilineaire,
+                    Methode::Bicubique,
+                ] {
+                    let label = match m {
+                        Methode::PlusProcheVoisin => "Plus proche",
+                        Methode::Bilineaire => "Bilinéaire",
+                        Methode::Bicubique => "Bicubique",
+                    };
+                    let sel = self.methode_interp == m;
+                    if ui.selectable_label(sel, label).clicked() {
+                        self.methode_interp = m;
+                    }
+                }
+                if matches!(
+                    self.operation,
+                    Operation::ZoomFacteur | Operation::AgrandirCopie
+                ) {
+                    section(ui, &format!("Facteur · {:.1}", self.facteur_zoom));
+                    ui.add(
+                        egui::Slider::new(&mut self.facteur_zoom, 1.5..=4.0)
+                            .show_value(false)
+                            .trailing_fill(true),
+                    );
+                }
+                if self.operation == Operation::Rotation {
+                    section(ui, &format!("Angle · {:.0}°", self.angle_rot));
+                    ui.add(
+                        egui::Slider::new(&mut self.angle_rot, -180.0..=180.0)
+                            .show_value(false)
+                            .trailing_fill(true),
+                    );
+                }
+            }
+            Operation::SeuilFixe => {
+                section(ui, &format!("Seuil · {:.0}", self.seuil_bin));
+                ui.add(
+                    egui::Slider::new(&mut self.seuil_bin, 0.0..=255.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::SeuilAdaptatif => {
+                section(ui, &format!("Taille bloc · {:.0}", self.taille_bloc));
+                ui.add(
+                    egui::Slider::new(&mut self.taille_bloc, 8.0..=64.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            Operation::KMoyennes => {
+                section(ui, &format!("k · {:.0}", self.k_clusters));
+                ui.add(
+                    egui::Slider::new(&mut self.k_clusters, 2.0..=8.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn ui_main(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            ui.painter().rect_filled(rect, 0.0, BG);
+
+            let pad = 20.0;
+            let hist_h = 118.0;
+            let header_h = 36.0;
+            let gap = 14.0;
+
+            let content = rect.shrink2(Vec2::new(pad, pad));
+            let header = Rect::from_min_size(content.min, Vec2::new(content.width(), header_h));
+            let hist = Rect::from_min_max(
+                Pos2::new(content.min.x, content.max.y - hist_h),
+                content.max,
+            );
+            let canvas = Rect::from_min_max(
+                Pos2::new(content.min.x, header.max.y + gap),
+                Pos2::new(content.max.x, hist.min.y - gap),
+            );
+
+            let sous_titre = match self.chapitre {
+                Chapitre::Arithmetique if self.vue_resultat_arith => "résultat de l'opération",
+                Chapitre::Arithmetique => "images A et B côte à côte",
+                _ => "comparateur avant / après",
+            };
+
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(header), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Studio")
+                            .size(15.0)
+                            .color(TEXT)
+                            .strong(),
+                    );
+                    ui.label(egui::RichText::new(sous_titre).size(12.5).color(TEXT_MUTED));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.chapitre == Chapitre::Arithmetique {
+                            self.ui_toggle_vue_arith(ui);
+                        } else if self.sortie.is_some() {
+                            ui.label(
+                                egui::RichText::new(format!("split {:.0}%", self.split * 100.0))
+                                    .size(12.0)
+                                    .color(TEXT_DIM),
+                            );
+                        }
+                    });
+                });
+            });
+
+            match self.chapitre {
+                Chapitre::Arithmetique if self.vue_resultat_arith && self.tex_sortie.is_some() => {
+                    self.ui_comparateur(ui, canvas);
+                }
+                Chapitre::Arithmetique => self.ui_duo_arithmetique(ui, canvas),
+                _ => {
+                    if self.entree.is_none() {
+                        self.ui_slot(
+                            ui,
+                            canvas,
+                            "A",
+                            self.tex_entree.clone(),
+                            self.hover_drop,
+                            true,
+                        );
+                    } else {
+                        self.ui_comparateur(ui, canvas);
+                    }
+                }
+            }
+
+            self.ui_histogrammes(ui, hist);
+        });
+    }
+
+    fn ui_toggle_vue_arith(&mut self, ui: &mut egui::Ui) {
+        let a_actif = !self.vue_resultat_arith;
+        let r_actif = self.vue_resultat_arith;
+        let a_btn = egui::Button::new(egui::RichText::new("A · B").size(12.5).color(if a_actif {
+            ACCENT
+        } else {
+            TEXT_DIM
+        }))
+        .fill(if a_actif { ACCENT_SOFT } else { SURFACE_3 })
+        .stroke(Stroke::new(1.0, if a_actif { ACCENT } else { BORDER }))
+        .corner_radius(8.0);
+        let r_btn = egui::Button::new(egui::RichText::new("Résultat").size(12.5).color(
+            if r_actif {
+                ACCENT
+            } else if self.sortie.is_some() {
+                TEXT_DIM
+            } else {
+                TEXT_MUTED
+            },
+        ))
+        .fill(if r_actif { ACCENT_SOFT } else { SURFACE_3 })
+        .stroke(Stroke::new(1.0, if r_actif { ACCENT } else { BORDER }))
+        .corner_radius(8.0);
+
+        // Ordre RTL : on ajoute Résultat puis A·B pour afficher A·B | Résultat
+        let r = ui.add_enabled(self.sortie.is_some(), r_btn);
+        ui.add_space(6.0);
+        let a = ui.add(a_btn);
+        if a.clicked() {
+            self.vue_resultat_arith = false;
+        }
+        if r.clicked() {
+            self.vue_resultat_arith = true;
+        }
+    }
+
+    fn ui_duo_arithmetique(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        let gap = 14.0;
+        let demi = (rect.width() - gap) / 2.0;
+        let gauche = Rect::from_min_size(rect.min, Vec2::new(demi, rect.height()));
+        let droite = Rect::from_min_size(
+            Pos2::new(rect.min.x + demi + gap, rect.min.y),
+            Vec2::new(demi, rect.height()),
+        );
+
+        // Cible du drag selon la position du pointeur
+        if let Some(pos) = ui.ctx().pointer_interact_pos() {
+            if rect.contains(pos) {
+                self.drop_slot_b = pos.x >= droite.min.x;
+            }
+        }
+
+        let drop_a = self.hover_drop && !self.drop_slot_b;
+        let drop_b = self.hover_drop && self.drop_slot_b;
+
+        self.ui_slot(ui, gauche, "A", self.tex_entree.clone(), drop_a, true);
+        self.ui_slot(ui, droite, "B", self.tex_entree_b.clone(), drop_b, false);
+    }
+
+    /// Emplacement image : aperçu ou « + » (clic / drop).
+    fn ui_slot(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        label: &str,
+        texture: Option<TextureHandle>,
+        drop_actif: bool,
+        est_a: bool,
+    ) {
+        let resp = ui.allocate_rect(rect, Sense::click());
+        let hover = resp.hovered() && !drop_actif;
+
+        let fill = if drop_actif {
+            Color32::from_rgb(20, 28, 30)
+        } else if hover {
+            Color32::from_rgb(20, 23, 28)
+        } else {
+            SURFACE_2
+        };
+        let trait_color = if drop_actif {
+            Color32::from_rgb(45, 140, 130)
+        } else if hover {
+            Color32::from_rgb(70, 85, 100)
+        } else {
+            Color32::from_rgb(55, 62, 74)
+        };
+
+        let painter = ui.painter();
+        painter.rect_filled(rect, CornerRadius::same(16), fill);
+        dessiner_rect_tirets(painter, rect.shrink(1.0), 16.0, trait_color, 6.0, 5.0);
+
+        painter.text(
+            Pos2::new(rect.left() + 14.0, rect.top() + 12.0),
+            egui::Align2::LEFT_TOP,
+            label,
+            egui::FontId::proportional(13.0),
+            TEXT_MUTED,
+        );
+
+        if let Some(tex) = texture {
+            let inner = rect.shrink2(Vec2::new(16.0, 28.0));
+            let fitted = fit_inside(tex.size_vec2(), inner.size());
+            let img_rect = Rect::from_center_size(inner.center(), fitted);
+            egui::Image::new(&tex)
+                .fit_to_exact_size(fitted)
+                .paint_at(ui, img_rect);
+        } else {
+            let centre = rect.center();
+            let plus_color = if drop_actif {
+                Color32::from_rgb(70, 170, 160)
+            } else if hover {
+                Color32::from_rgb(120, 140, 155)
+            } else {
+                TEXT_MUTED
+            };
+            painter.text(
+                centre,
+                egui::Align2::CENTER_CENTER,
+                "+",
+                egui::FontId::proportional(44.0),
+                plus_color,
+            );
+            painter.text(
+                Pos2::new(centre.x, centre.y + 38.0),
+                egui::Align2::CENTER_TOP,
+                if drop_actif {
+                    "Relâche pour ouvrir"
+                } else {
+                    "Glisse · ou clique"
+                },
+                egui::FontId::proportional(12.5),
+                TEXT_MUTED,
+            );
+        }
+
+        if resp.clicked() {
+            if est_a {
+                self.ouvrir_dialogue(ui.ctx());
+            } else {
+                self.ouvrir_dialogue_b(ui.ctx());
+            }
+        }
+        ui.ctx().request_repaint();
+    }
+
+    fn ui_comparateur(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(14), Color32::from_rgb(6, 8, 12));
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(14),
+            Stroke::new(1.0, BORDER),
+            egui::StrokeKind::Inside,
+        );
+
+        let Some(tex_in) = self.tex_entree.clone() else {
+            return;
+        };
+        let tex_out = self.tex_sortie.clone();
+        let size = tex_in.size_vec2();
+        let fitted = fit_inside(size, rect.shrink(12.0).size());
+        let img_rect = Rect::from_center_size(rect.center(), fitted);
+
+        // Entrée (fond)
+        egui::Image::new(&tex_in)
+            .fit_to_exact_size(fitted)
+            .paint_at(ui, img_rect);
+
+        let split_x = img_rect.left() + img_rect.width() * self.anim_split;
+
+        if let Some(tex_out) = tex_out {
+            // Sortie clipée à droite du split
+            let clip = Rect::from_min_max(Pos2::new(split_x, img_rect.top()), img_rect.max)
+                .intersect(img_rect);
+            if clip.width() > 0.5 && clip.height() > 0.5 {
+                let mut mesh = Mesh::with_texture(tex_out.id());
+                mesh.add_rect_with_uv(
+                    clip,
+                    Rect::from_min_max(
+                        Pos2::new(
+                            (clip.min.x - img_rect.min.x) / img_rect.width(),
+                            (clip.min.y - img_rect.min.y) / img_rect.height(),
+                        ),
+                        Pos2::new(
+                            (clip.max.x - img_rect.min.x) / img_rect.width(),
+                            (clip.max.y - img_rect.min.y) / img_rect.height(),
+                        ),
+                    ),
+                    Color32::WHITE,
+                );
+                ui.painter().add(Shape::mesh(mesh));
+            }
+
+            // Ligne + poignée
+            let painter = ui.painter();
+            painter.line_segment(
+                [
+                    Pos2::new(split_x, img_rect.top()),
+                    Pos2::new(split_x, img_rect.bottom()),
+                ],
+                Stroke::new(2.0, ACCENT),
+            );
+            let handle = Rect::from_center_size(
+                Pos2::new(split_x, img_rect.center().y),
+                Vec2::new(18.0, 44.0),
+            );
+            painter.rect_filled(handle, 8.0, ACCENT);
+            painter.text(
+                handle.center(),
+                egui::Align2::CENTER_CENTER,
+                "⇄",
+                egui::FontId::proportional(14.0),
+                BG,
+            );
+
+            // Labels
+            painter.text(
+                Pos2::new(img_rect.left() + 10.0, img_rect.top() + 10.0),
+                egui::Align2::LEFT_TOP,
+                "AVANT",
+                egui::FontId::proportional(11.0),
+                TEXT_DIM,
+            );
+            painter.text(
+                Pos2::new(img_rect.right() - 10.0, img_rect.top() + 10.0),
+                egui::Align2::RIGHT_TOP,
+                "APRÈS",
+                egui::FontId::proportional(11.0),
+                TEXT_DIM,
+            );
+
+            let resp = ui.allocate_rect(img_rect, Sense::click_and_drag());
+            if resp.dragged() || resp.is_pointer_button_down_on() {
+                if let Some(pos) = resp.interact_pointer_pos() {
+                    self.split = ((pos.x - img_rect.left()) / img_rect.width()).clamp(0.02, 0.98);
+                }
+            }
+        } else {
+            ui.painter().text(
+                Pos2::new(img_rect.center().x, img_rect.bottom() + 8.0)
+                    .max(Pos2::new(img_rect.center().x, rect.bottom() - 18.0)),
+                egui::Align2::CENTER_BOTTOM,
+                "Applique une opération pour comparer",
+                egui::FontId::proportional(12.0),
+                TEXT_MUTED,
+            );
+        }
+    }
+
+    fn ui_histogrammes(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
+            theme::carte().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Histogrammes")
+                            .size(13.0)
+                            .color(TEXT)
+                            .strong(),
+                    );
+                    ui.label(
+                        egui::RichText::new("distribution des niveaux de gris")
+                            .size(11.5)
+                            .color(TEXT_MUTED),
+                    );
+                });
+                ui.add_space(8.0);
+                let h = ui.available_height().max(56.0);
+                let w = ui.available_width();
+                let demi = (w - 12.0) / 2.0;
+                ui.horizontal(|ui| {
+                    dessiner_histogramme(
+                        ui,
+                        "Entrée",
+                        &self.hist_entree,
+                        self.entree.is_some(),
+                        Vec2::new(demi, h),
+                    );
+                    ui.add_space(12.0);
+                    dessiner_histogramme(
+                        ui,
+                        "Sortie",
+                        &self.hist_sortie,
+                        self.sortie.is_some(),
+                        Vec2::new(demi, h),
+                    );
+                });
+            });
+        });
+    }
+
+    fn ui_toast(&mut self, ui: &mut egui::Ui, full: Rect) {
+        let Some(toast) = &self.toast else {
+            return;
+        };
+        let age = toast.cree.elapsed();
+        if age > Duration::from_secs(3) {
+            self.toast = None;
+            return;
+        }
+        let fade = if age < Duration::from_millis(200) {
+            age.as_secs_f32() / 0.2
+        } else if age > Duration::from_millis(2600) {
+            1.0 - (age.as_secs_f32() - 2.6) / 0.4
+        } else {
+            1.0
+        };
+
+        let color = if toast.ok { SUCCESS } else { DANGER };
+        let bg = Color32::from_rgba_unmultiplied(24, 28, 36, (230.0 * fade) as u8);
+        let size = Vec2::new(360.0, 48.0);
+        let pos = Pos2::new(full.center().x - size.x / 2.0, full.max.y - 80.0);
+        let toast_rect = Rect::from_min_size(pos, size);
+
+        ui.painter().rect_filled(toast_rect, 12.0, bg);
+        ui.painter().rect_stroke(
+            toast_rect,
+            12.0,
+            Stroke::new(
+                1.0,
+                Color32::from_rgba_unmultiplied(
+                    color.r(),
+                    color.g(),
+                    color.b(),
+                    (200.0 * fade) as u8,
+                ),
+            ),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(
+            toast_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            &toast.texte,
+            egui::FontId::proportional(13.0),
+            Color32::from_rgba_unmultiplied(TEXT.r(), TEXT.g(), TEXT.b(), (255.0 * fade) as u8),
+        );
+    }
+}
+
+fn dessiner_rect_tirets(
+    painter: &egui::Painter,
+    rect: Rect,
+    rayon: f32,
+    couleur: Color32,
+    tiret: f32,
+    trou: f32,
+) {
+    let stroke = Stroke::new(1.25, couleur);
+    let segments = [
+        // haut
+        (
+            Pos2::new(rect.left() + rayon, rect.top()),
+            Pos2::new(rect.right() - rayon, rect.top()),
+        ),
+        // bas
+        (
+            Pos2::new(rect.left() + rayon, rect.bottom()),
+            Pos2::new(rect.right() - rayon, rect.bottom()),
+        ),
+        // gauche
+        (
+            Pos2::new(rect.left(), rect.top() + rayon),
+            Pos2::new(rect.left(), rect.bottom() - rayon),
+        ),
+        // droite
+        (
+            Pos2::new(rect.right(), rect.top() + rayon),
+            Pos2::new(rect.right(), rect.bottom() - rayon),
+        ),
+    ];
+    for (a, b) in segments {
+        tracer_tirets(painter, a, b, stroke, tiret, trou);
+    }
+}
+
+fn tracer_tirets(painter: &egui::Painter, a: Pos2, b: Pos2, stroke: Stroke, tiret: f32, trou: f32) {
+    let delta = b - a;
+    let len = delta.length();
+    if len < 1.0 {
+        return;
+    }
+    let dir = delta / len;
+    let pas = tiret + trou;
+    let mut d = 0.0;
+    while d < len {
+        let d1 = (d + tiret).min(len);
+        painter.line_segment([a + dir * d, a + dir * d1], stroke);
+        d += pas;
+    }
+}
+
+fn nav_bouton(ui: &mut egui::Ui, glyphe: &str, tip: &str, selected: bool) -> egui::Response {
+    let size = Vec2::new(42.0, 40.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    let hovered = resp.hovered();
+    let bg = if selected {
+        ACCENT_SOFT
+    } else if hovered {
+        SURFACE_3
+    } else {
+        Color32::TRANSPARENT
+    };
+    ui.painter().rect_filled(rect, 12.0, bg);
+    if selected {
+        ui.painter().rect_stroke(
+            rect,
+            12.0,
+            Stroke::new(1.0, ACCENT),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        glyphe,
+        egui::FontId::proportional(18.0),
+        if selected || hovered {
+            ACCENT
+        } else {
+            TEXT_DIM
+        },
+    );
+    resp.on_hover_text(tip)
+}
+
+fn section(ui: &mut egui::Ui, titre: &str) {
+    ui.label(
+        egui::RichText::new(titre.to_uppercase())
+            .size(11.0)
+            .color(TEXT_MUTED)
+            .strong(),
+    );
+    ui.add_space(6.0);
+}
+
+fn op_choix(ui: &mut egui::Ui, courant: &mut Operation, valeur: Operation) {
+    let selected = *courant == valeur;
+    let fill = if selected { ACCENT_SOFT } else { SURFACE_3 };
+    let stroke = if selected {
+        Stroke::new(1.0, ACCENT)
+    } else {
+        Stroke::new(1.0, BORDER)
+    };
+    let resp = ui.add(
+        egui::Button::new(
+            egui::RichText::new(valeur.label())
+                .size(13.0)
+                .color(if selected { ACCENT } else { TEXT }),
+        )
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(8.0)
+        .min_size(Vec2::new(ui.available_width(), 34.0)),
+    );
+    if resp.clicked() {
+        *courant = valeur;
+    }
+    ui.add_space(6.0);
+}
+
+fn stats_ligne(ui: &mut egui::Ui, label: &str, s: &Stats) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(label).size(12.0).color(TEXT_DIM));
+        ui.label(
+            egui::RichText::new(format!(
+                "min {} · max {} · μ {:.1}",
+                s.min, s.max, s.moyenne
+            ))
+            .size(12.0)
+            .color(TEXT),
+        );
+    });
+}
+
+fn dessiner_histogramme(
+    ui: &mut egui::Ui,
+    titre: &str,
+    hist: &[u32; 256],
+    actif: bool,
+    taille: Vec2,
+) {
+    ui.vertical(|ui| {
+        ui.set_width(taille.x);
+        ui.label(egui::RichText::new(titre).size(11.0).color(TEXT_MUTED));
+        let (rect, _) =
+            ui.allocate_exact_size(Vec2::new(taille.x, taille.y - 18.0), Sense::hover());
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 8.0, Color32::from_rgb(10, 12, 16));
+
+        if !actif {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "—",
+                egui::FontId::proportional(14.0),
+                TEXT_MUTED,
+            );
+            return;
+        }
+
+        let max = hist.iter().copied().max().unwrap_or(1).max(1) as f32;
+        let w = rect.width() / 256.0;
+        for (i, &c) in hist.iter().enumerate() {
+            let h = (c as f32 / max) * (rect.height() - 2.0);
+            if h < 0.5 {
+                continue;
+            }
+            let t = i as f32 / 255.0;
+            let color = lerp_color(HIST_BOT, HIST_TOP, t);
+            let x = rect.left() + i as f32 * w;
+            painter.rect_filled(
+                Rect::from_min_max(
+                    Pos2::new(x, rect.bottom() - h),
+                    Pos2::new(x + w.max(1.0), rect.bottom()),
+                ),
+                0.0,
+                color,
+            );
+        }
+    });
+}
+
+fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    Color32::from_rgb(
+        (a.r() as f32 + (b.r() as f32 - a.r() as f32) * t) as u8,
+        (a.g() as f32 + (b.g() as f32 - a.g() as f32) * t) as u8,
+        (a.b() as f32 + (b.b() as f32 - a.b() as f32) * t) as u8,
+    )
+}
+
+fn fit_inside(img: Vec2, box_size: Vec2) -> Vec2 {
+    let sx = box_size.x / img.x;
+    let sy = box_size.y / img.y;
+    let s = sx.min(sy);
+    img * s
+}
+
+fn en_binaire(img: &ImageGris, seuil: u8) -> ImageBinaire {
+    img.map(|&p| p >= seuil)
+}
+
+fn impair(v: f32) -> usize {
+    let n = v.round().max(3.0) as usize;
+    if n.is_multiple_of(2) {
+        n + 1
+    } else {
+        n
+    }
+}
+
+fn stats_depuis_lib(img: &ImageGris) -> Stats {
+    let (min, max) = ponctuel::dynamique(img);
+    Stats {
+        min,
+        max,
+        moyenne: ponctuel::luminance(img) as f32,
+    }
+}
+
+fn texture_depuis_gris(ctx: &egui::Context, nom: &str, img: &ImageGris) -> TextureHandle {
+    let (l, h) = img.dimensions();
+    let mut rgba = Vec::with_capacity(l * h * 4);
+    for &p in img.donnees() {
+        rgba.extend_from_slice(&[p, p, p, 255]);
+    }
+    let color = ColorImage::from_rgba_unmultiplied([l, h], &rgba);
+    ctx.load_texture(nom, color, egui::TextureOptions::LINEAR)
+}

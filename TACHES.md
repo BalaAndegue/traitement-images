@@ -44,12 +44,12 @@ Déjà fait :
 - [x] structure de la ligne de commande, images de test dans `images/`
 
 Chapitre 1 (`bases.rs`) :
-- [ ] conversion couleur -> gris (luminance et moyenne)
-- [ ] extraction et isolement des canaux R, V, B
-- [ ] quantification (résolution tonale, L = 2^K)
-- [ ] échantillonnage et pixelisation (résolution spatiale)
-- [ ] taille de stockage b = M x N x K
-- [ ] profils d'intensité (ligne, colonne, segment) et tracé du profil
+- [x] conversion couleur -> gris (luminance et moyenne)
+- [x] extraction et isolement des canaux R, V, B
+- [x] quantification (résolution tonale, L = 2^K)
+- [x] échantillonnage et pixelisation (résolution spatiale)
+- [x] taille de stockage b = M x N x K
+- [x] profils d'intensité (ligne, colonne, segment) et tracé du profil
 
 Application :
 - [ ] interface graphique (egui) : ouvrir une image, choisir une opération dans un menu par chapitre, régler les paramètres, voir l'avant/après, afficher l'histogramme, enregistrer

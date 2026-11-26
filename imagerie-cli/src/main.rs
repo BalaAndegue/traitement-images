@@ -55,6 +55,9 @@ enum Commande {
     /// Chapitre 5 : contours et transformée de Hough.
     #[command(subcommand)]
     Contours(commandes::contours::Cmd),
+    /// Chapitre 5 : transformée de Hough (droites).
+    #[command(subcommand)]
+    Hough(commandes::hough::Cmd),
     /// Chapitre 6 : segmentation.
     #[command(subcommand)]
     Segmentation(commandes::segmentation::Cmd),
@@ -82,6 +85,7 @@ fn main() -> ExitCode {
         Commande::Filtre(c) => commandes::filtrage::executer(c),
         Commande::Fourier(c) => commandes::fourier::executer(c),
         Commande::Contours(c) => commandes::contours::executer(c),
+        Commande::Hough(c) => commandes::hough::executer(c),
         Commande::Segmentation(c) => commandes::segmentation::executer(c),
         Commande::Binaire(c) => commandes::binaire::executer(c),
         Commande::Morphologie(c) => commandes::morphologie::executer(c),
