@@ -197,7 +197,7 @@ pub fn agrandir_par_copie(img: &ImageGris, facteur: usize) -> Resultat<ImageGris
 ///
 /// **Linéaire** : pour chaque i, on insère entre x(i) et x(i+1) :
 ///   y(i+1/2) = (x(i) + x(i+1)) / 2
-///   Extrapolation au bord droit : 2·x(N-1) − x(N-2).
+///   Extrapolation au bord droit (demi-pas) : x(N-1) + ½·(x(N-1) − x(N-2)).
 ///
 /// **Cubique** (Catmull-Rom 1D) : pour chaque i, on insère entre x(i) et x(i+1) :
 ///   y(i+1/2) = (−x(i-1) + 9·x(i) + 9·x(i+1) − x(i+2)) / 16
@@ -227,8 +227,9 @@ pub fn interpoler_ligne_x2(ligne: &[f64], methode: Methode) -> Vec<f64> {
                 let milieu = if i + 1 < n {
                     (ligne[i] + ligne[i + 1]) / 2.0
                 } else {
-                    // Extrapolation linéaire au bord droit : 2·x(N-1) − x(N-2)
-                    2.0 * ligne[n - 1] - ligne[n - 2]
+                    // Extrapolation linéaire au bord droit (t = +0.5) :
+                    // x(N-1) + 0.5·(x(N-1) − x(N-2))
+                    ligne[n - 1] + 0.5 * (ligne[n - 1] - ligne[n - 2])
                 };
                 sortie.push(milieu);
             }
@@ -572,12 +573,15 @@ mod tests {
 
     #[test]
     fn interpoler_ligne_x3_monotone() {
-        // Sur une rampe constante, tous les points interpolés doivent rester dans la plage.
+        // Sur une rampe linéaire, l'intérieur reste dans [0, 90] ; l'extrapolation
+        // au bord droit pousse jusqu'à 90 + (2/3)·10 ≈ 96.67.
         let ligne: Vec<f64> = (0..10).map(|i| i as f64 * 10.0).collect();
         let r = interpoler_ligne_x3_cubique(&ligne);
         for &v in &r {
-            assert!((-1.0..=91.0).contains(&v), "valeur hors plage : {v}");
+            assert!((-1.0..=97.0).contains(&v), "valeur hors plage : {v}");
         }
+        assert!((r[r.len() - 2] - (90.0 + 10.0 / 3.0)).abs() < 1e-9);
+        assert!((r[r.len() - 1] - (90.0 + 20.0 / 3.0)).abs() < 1e-9);
     }
 
     // ---- zoom_x2_separable ----
