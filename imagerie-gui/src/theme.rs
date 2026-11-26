@@ -34,27 +34,27 @@ pub fn appliquer(ctx: &egui::Context) {
     visuals.override_text_color = Some(TEXT);
     visuals.hyperlink_color = ACCENT;
     visuals.selection.bg_fill = ACCENT_SOFT;
-    visuals.selection.stroke = Stroke::new(1.0, ACCENT);
+    visuals.selection.stroke = Stroke::new(1.0_f32, ACCENT);
     visuals.window_corner_radius = CornerRadius::same(RADIUS as u8);
     visuals.menu_corner_radius = CornerRadius::same(10);
-    visuals.window_stroke = Stroke::new(1.0, BORDER);
+    visuals.window_stroke = Stroke::new(1.0_f32, BORDER);
     visuals.widgets.noninteractive.bg_fill = SURFACE_2;
-    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_DIM);
+    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, TEXT_DIM);
     visuals.widgets.noninteractive.corner_radius = CornerRadius::same(8);
     visuals.widgets.inactive.bg_fill = SURFACE_3;
-    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, BORDER);
-    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT);
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, BORDER);
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, TEXT);
     visuals.widgets.inactive.corner_radius = CornerRadius::same(8);
     visuals.widgets.hovered.bg_fill = Color32::from_rgb(40, 48, 60);
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT_DIM);
-    visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, ACCENT_DIM);
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, TEXT);
     visuals.widgets.hovered.corner_radius = CornerRadius::same(8);
     visuals.widgets.active.bg_fill = ACCENT_DIM;
-    visuals.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
-    visuals.widgets.active.fg_stroke = Stroke::new(1.0, TEXT);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
+    visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, TEXT);
     visuals.widgets.active.corner_radius = CornerRadius::same(8);
     visuals.widgets.open.bg_fill = SURFACE_3;
-    visuals.widgets.open.bg_stroke = Stroke::new(1.0, ACCENT);
+    visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, ACCENT);
     visuals.widgets.open.corner_radius = CornerRadius::same(8);
     visuals.slider_trailing_fill = true;
     ctx.set_visuals(visuals);
@@ -111,7 +111,7 @@ fn charger_polices(ctx: &egui::Context) {
 pub fn carte() -> egui::Frame {
     egui::Frame::new()
         .fill(SURFACE_2)
-        .stroke(Stroke::new(1.0, BORDER))
+        .stroke(Stroke::new(1.0_f32, BORDER))
         .corner_radius(RADIUS)
         .inner_margin(egui::Margin::same(16))
 }

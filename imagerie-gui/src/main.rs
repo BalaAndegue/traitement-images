@@ -899,7 +899,7 @@ impl App {
                     Pos2::new(rect.max.x, rect.min.y),
                     Pos2::new(rect.max.x, rect.max.y),
                 ],
-                Stroke::new(1.0, BORDER),
+                Stroke::new(1.0_f32, BORDER),
             );
 
             ui.vertical_centered(|ui| {
@@ -935,7 +935,7 @@ impl App {
                     Pos2::new(rect.min.x, rect.min.y),
                     Pos2::new(rect.min.x, rect.max.y),
                 ],
-                Stroke::new(1.0, BORDER),
+                Stroke::new(1.0_f32, BORDER),
             );
 
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect.shrink(14.0)), |ui| {
@@ -977,7 +977,7 @@ impl App {
                                 .add(
                                     egui::Button::new("Charger l'image B…")
                                         .fill(SURFACE_3)
-                                        .stroke(Stroke::new(1.0, BORDER))
+                                        .stroke(Stroke::new(1.0_f32, BORDER))
                                         .corner_radius(8.0)
                                         .min_size(Vec2::new(ui.available_width(), 32.0)),
                                 )
@@ -1014,7 +1014,7 @@ impl App {
                                         .color(TEXT),
                                 )
                                 .fill(SURFACE_3)
-                                .stroke(Stroke::new(1.0, BORDER))
+                                .stroke(Stroke::new(1.0_f32, BORDER))
                                 .corner_radius(10.0)
                                 .min_size(Vec2::new(ui.available_width(), 36.0)),
                             )
@@ -1176,7 +1176,7 @@ impl App {
                                 }),
                             )
                             .fill(if sel { ACCENT_SOFT } else { SURFACE_3 })
-                            .stroke(Stroke::new(1.0, if sel { ACCENT } else { BORDER }))
+                            .stroke(Stroke::new(1.0_f32, if sel { ACCENT } else { BORDER }))
                             .corner_radius(8.0)
                             .min_size(Vec2::new(ui.available_width(), 30.0)),
                         )
@@ -1413,7 +1413,7 @@ impl App {
             TEXT_DIM
         }))
         .fill(if a_actif { ACCENT_SOFT } else { SURFACE_3 })
-        .stroke(Stroke::new(1.0, if a_actif { ACCENT } else { BORDER }))
+        .stroke(Stroke::new(1.0_f32, if a_actif { ACCENT } else { BORDER }))
         .corner_radius(8.0);
         let r_btn = egui::Button::new(egui::RichText::new("Résultat").size(12.5).color(
             if r_actif {
@@ -1425,7 +1425,7 @@ impl App {
             },
         ))
         .fill(if r_actif { ACCENT_SOFT } else { SURFACE_3 })
-        .stroke(Stroke::new(1.0, if r_actif { ACCENT } else { BORDER }))
+        .stroke(Stroke::new(1.0_f32, if r_actif { ACCENT } else { BORDER }))
         .corner_radius(8.0);
 
         // Ordre RTL : on ajoute Résultat puis A·B pour afficher A·B | Résultat
@@ -1555,7 +1555,7 @@ impl App {
         ui.painter().rect_stroke(
             rect,
             CornerRadius::same(14),
-            Stroke::new(1.0, BORDER),
+            Stroke::new(1.0_f32, BORDER),
             egui::StrokeKind::Inside,
         );
 
@@ -1604,7 +1604,7 @@ impl App {
                     Pos2::new(split_x, img_rect.top()),
                     Pos2::new(split_x, img_rect.bottom()),
                 ],
-                Stroke::new(2.0, ACCENT),
+                Stroke::new(2.0_f32, ACCENT),
             );
             let handle = Rect::from_center_size(
                 Pos2::new(split_x, img_rect.center().y),
@@ -1722,7 +1722,7 @@ impl App {
             toast_rect,
             12.0,
             Stroke::new(
-                1.0,
+                1.0_f32,
                 Color32::from_rgba_unmultiplied(
                     color.r(),
                     color.g(),
@@ -1750,7 +1750,7 @@ fn dessiner_rect_tirets(
     tiret: f32,
     trou: f32,
 ) {
-    let stroke = Stroke::new(1.25, couleur);
+    let stroke = Stroke::new(1.25_f32, couleur);
     let segments = [
         // haut
         (
@@ -1810,7 +1810,7 @@ fn nav_bouton(ui: &mut egui::Ui, glyphe: &str, tip: &str, selected: bool) -> egu
         ui.painter().rect_stroke(
             rect,
             12.0,
-            Stroke::new(1.0, ACCENT),
+            Stroke::new(1.0_f32, ACCENT),
             egui::StrokeKind::Inside,
         );
     }
@@ -1842,9 +1842,9 @@ fn op_choix(ui: &mut egui::Ui, courant: &mut Operation, valeur: Operation) {
     let selected = *courant == valeur;
     let fill = if selected { ACCENT_SOFT } else { SURFACE_3 };
     let stroke = if selected {
-        Stroke::new(1.0, ACCENT)
+        Stroke::new(1.0_f32, ACCENT)
     } else {
-        Stroke::new(1.0, BORDER)
+        Stroke::new(1.0_f32, BORDER)
     };
     let resp = ui.add(
         egui::Button::new(
