@@ -8,28 +8,24 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::alea::Alea;
+use crate::contours::{gradient, Operateur};
 use crate::erreur::{Erreur, Resultat};
-use crate::image::{Connexite, ImageBinaire, ImageEtiquettes, ImageGris, ImageRvb, Rvb};
+use crate::image::{Bord, Connexite, ImageBinaire, ImageEtiquettes, ImageGris, ImageRvb, Rvb};
+use crate::ponctuel::histogramme;
 
 // ---------------------------------------------------------------------------
 // Outils internes
 // ---------------------------------------------------------------------------
 
-/// Histogramme H(k) d'un ensemble de pixels.
-///
-/// `ponctuel::histogramme` (Jeff) n'est pas encore écrit sur `main` : on garde
-/// cette version privée en attendant. Elle pourra être remplacée par
-/// `crate::ponctuel::histogramme(img)` pour l'image entière.
+/// Histogramme H(k) d'un ensemble de pixels qui n'est pas une `ImageGris`
+/// (blocs du seuillage adaptatif). Pour une image entière, on utilise
+/// `ponctuel::histogramme`.
 fn histogramme_pixels<'a>(pixels: impl Iterator<Item = &'a u8>) -> [u32; 256] {
     let mut h = [0u32; 256];
     for &p in pixels {
         h[p as usize] += 1;
     }
     h
-}
-
-fn histogramme_image(img: &ImageGris) -> [u32; 256] {
-    histogramme_pixels(img.donnees().iter())
 }
 
 /// Parmi les valeurs `cout[t]` définies, renvoie le milieu du premier palier
@@ -148,7 +144,7 @@ pub fn seuil_milieu(img: &ImageGris) -> u8 {
 
 /// Seuil qui équilibre les deux parties de l'histogramme (médiane des pixels).
 pub fn seuil_median(img: &ImageGris) -> u8 {
-    let h = histogramme_image(img);
+    let h = histogramme(img);
     let total = img.nb_pixels() as f64;
     if total == 0.0 {
         return 0;
@@ -166,12 +162,12 @@ pub fn seuil_median(img: &ImageGris) -> u8 {
 /// Algorithme d'Otsu : le seuil qui minimise la variance intra-classes
 /// sigma_w² = P1 sigma1² + P2 sigma2².
 pub fn seuil_otsu(img: &ImageGris) -> u8 {
-    otsu_histogramme(&histogramme_image(img))
+    otsu_histogramme(&histogramme(img))
 }
 
 /// Bonus : méthode de Kittler (erreur minimale, modèle gaussien).
 pub fn seuil_kittler(img: &ImageGris) -> u8 {
-    let h = histogramme_image(img);
+    let h = histogramme(img);
     let total = img.nb_pixels() as f64;
     if total == 0.0 {
         return 0;
@@ -323,7 +319,7 @@ pub fn kmoyennes_gris(
 ) -> Resultat<KMoyennes<f64>> {
     // Tous les pixels d'un même niveau tombent dans le même groupe : on travaille
     // sur l'histogramme (256 entrées) au lieu des M x N pixels.
-    let h = histogramme_image(img);
+    let h = histogramme(img);
     let niveaux: Vec<usize> = (0..256).filter(|&v| h[v] > 0).collect();
     verifier_kmoyennes(k, iterations_max, niveaux.len())?;
 
@@ -762,30 +758,6 @@ pub fn croissance_regions(
     Ok(etiquettes)
 }
 
-/// Norme du gradient de Sobel |Gx| + |Gy| (bord répliqué).
-///
-/// `contours::gradient` (Pio) n'est pas encore écrit sur `main` : version privée
-/// minimale pour le choix des germes.
-fn norme_sobel(img: &ImageGris) -> Vec<f64> {
-    let (l, h) = img.dimensions();
-    let p = |x: isize, y: isize| -> f64 {
-        let xc = x.clamp(0, l as isize - 1) as usize;
-        let yc = y.clamp(0, h as isize - 1) as usize;
-        img[(xc, yc)] as f64
-    };
-    let mut g = Vec::with_capacity(l * h);
-    for y in 0..h as isize {
-        for x in 0..l as isize {
-            let gx = (p(x + 1, y - 1) + 2.0 * p(x + 1, y) + p(x + 1, y + 1))
-                - (p(x - 1, y - 1) + 2.0 * p(x - 1, y) + p(x - 1, y + 1));
-            let gy = (p(x - 1, y + 1) + 2.0 * p(x, y + 1) + p(x + 1, y + 1))
-                - (p(x - 1, y - 1) + 2.0 * p(x, y - 1) + p(x + 1, y - 1));
-            g.push(gx.abs() + gy.abs());
-        }
-    }
-    g
-}
-
 /// Choix automatique de germes : minima locaux de la norme du gradient, espacés d'au
 /// moins `espacement` pixels.
 ///
@@ -798,14 +770,14 @@ pub fn germes_automatiques(img: &ImageGris, espacement: usize) -> Vec<(usize, us
         return Vec::new();
     }
     let espacement = espacement.max(1);
-    let g = norme_sobel(img);
+    let g = gradient(img, Operateur::Sobel, Bord::Replique).norme_approchee();
     let mut candidats = Vec::new();
     for y in 0..h {
         for x in 0..l {
-            let v = g[y * l + x];
+            let v = g[(x, y)];
             let minimum = Connexite::Huit.voisins().iter().all(|&(dx, dy)| {
                 let (vx, vy) = (x as isize + dx, y as isize + dy);
-                !img.contient(vx, vy) || v <= g[vy as usize * l + vx as usize]
+                !img.contient(vx, vy) || v <= g[(vx as usize, vy as usize)]
             });
             if minimum {
                 candidats.push((v, x, y));
