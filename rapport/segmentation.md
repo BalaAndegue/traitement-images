@@ -143,11 +143,12 @@ indépendant de la taille de l'image. On ne considère que T dans [1, 255] avec
 deux classes non vides. Une image constante renvoie son unique niveau.
 
 **Dépendance.** Le cours et `TACHES.md` prévoient d'utiliser
-`ponctuel::histogramme` (Jeff). Cette fonction est encore un `todo!()` sur
-`main` : l'histogramme est donc calculé par une fonction privée
-`histogramme_pixels` de `segmentation.rs`. Quand `ponctuel::histogramme` sera
-fusionnée, il suffira de remplacer `histogramme_image(img)` par
-`crate::ponctuel::histogramme(img)` (même type `[u32; 256]`).
+`ponctuel::histogramme` (Jeff). Les seuils calculés sur l'image entière
+(`seuil_median`, `seuil_otsu`, `seuil_kittler`, `kmoyennes_gris`, et le
+seuil global de `seuillage_adaptatif`) appellent cette fonction, qui
+renvoie un `[u32; 256]`. Pour les blocs du seuillage adaptatif, qui ne
+sont pas une `ImageGris` complète, l'histogramme est calculé par une
+petite fonction interne `histogramme_pixels`.
 
 **Résultats.**
 
@@ -300,12 +301,12 @@ important) ». Avec plusieurs germes, plusieurs régions grandissent.
   l'atteint. Germe i → étiquette i + 1 ; un germe déjà pris (germe en double)
   ne crée pas de région ; les pixels jamais atteints restent à 0.
 - `germes_automatiques` : norme du gradient de Sobel |Gx| + |Gy| (bord
-  répliqué), minima locaux (pixel <= ses 8 voisins), triés par gradient
-  croissant ; un minimum est retenu s'il est à au moins `espacement` pixels
-  (distance max(|dx|, |dy|)) de tous les germes déjà retenus. Dans une zone
-  plate, tout pixel est un minimum : on obtient une grille de germes espacés.
-  `contours::gradient` (Pio) n'étant pas encore écrit, le gradient de Sobel est
-  calculé par une fonction privée.
+  répliqué), calculée avec `contours::gradient` (Pio) et
+  `Gradient::norme_approchee`, minima locaux (pixel <= ses 8 voisins), triés
+  par gradient croissant ; un minimum est retenu s'il est à au moins
+  `espacement` pixels (distance max(|dx|, |dy|)) de tous les germes déjà
+  retenus. Dans une zone plate, tout pixel est un minimum : on obtient une
+  grille de germes espacés.
 
 **Résultats.**
 
