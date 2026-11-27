@@ -74,13 +74,17 @@ Entre chaque paire de points consécutifs $x(i)$ et $x(i+1)$, on insère :
 
 $$y\!\left(i + \tfrac{1}{2}\right) = \frac{x(i) + x(i+1)}{2}$$
 
-Extrapolation au bord droit : $2\,x(N-1) - x(N-2)$.
+Au bord droit, l'échantillon manquant est extrapolé linéairement, $x(N) = 2\,x(N-1) - x(N-2)$ (indices à partir de 0), puis on prend le milieu : $y\!\left(N - \tfrac{1}{2}\right) = \frac{3\,x(N-1) - x(N-2)}{2}$.
 
 ### 6.2 Cubique (formule du cours)
 
 $$y\!\left(i + \tfrac{1}{2}\right) = \frac{-x(i-1) + 9\,x(i) + 9\,x(i+1) - x(i+2)}{16}$$
 
-Extrapolations aux extrémités : parabolique au bord droit, bord répliqué au bord gauche.
+Dans le premier et le dernier intervalle, $x(i-1)$ ou $x(i+2)$ n'existe pas : on l'extrapole par une parabole, par exemple $x(-1) = 3\,x(0) - 3\,x(1) + x(2)$. Reporté dans la formule /16, cela donne la parabole passant par les trois points disponibles :
+
+$$y\!\left(\tfrac{1}{2}\right) = \frac{3\,x(0) + 6\,x(1) - x(2)}{8}, \qquad y\!\left(N - \tfrac{3}{2}\right) = \frac{-x(N-3) + 6\,x(N-2) + 3\,x(N-1)}{8}$$
+
+Après le dernier point, on utilise la même extrapolation linéaire que ci-dessus.
 
 ---
 
@@ -90,9 +94,13 @@ Le spline de Catmull-Rom évalué en $t = 1/3$ et $t = 2/3$ dans l'intervalle $[
 
 $$p(t) = \frac{1}{2}\bigl[(-a+3b-3c+d)\,t^3 + (2a-5b+4c-d)\,t^2 + (-a+c)\,t + 2b\bigr]$$
 
-avec $a = x(i-1)$, $b = x(i)$, $c = x(i+1)$, $d = x(i+2)$.
+avec $a = x(i-1)$, $b = x(i)$, $c = x(i+1)$, $d = x(i+2)$. En $t = 1/3$ et $t = 2/3$ on obtient les formules entières en /81 :
 
-La sortie contient $3n$ valeurs : $x(0),\, p(0,\tfrac{1}{3}),\, p(0,\tfrac{2}{3}),\, x(1), \ldots$
+$$y\!\left(i + \tfrac{1}{3}\right) = \frac{-6a + 63b + 27c - 3d}{81}, \qquad y\!\left(i + \tfrac{2}{3}\right) = \frac{-3a + 27b + 63c - 6d}{81}$$
+
+Aux extrémités, parabole par les trois points disponibles : $\frac{45\,x(0) + 45\,x(1) - 9\,x(2)}{81}$ et $\frac{18\,x(0) + 72\,x(1) - 9\,x(2)}{81}$ dans le premier intervalle, $\frac{-9a + 72b + 18c}{81}$ et $\frac{-9a + 45b + 45c}{81}$ dans le dernier. Après le dernier point : extrapolation linéaire $x(N-1) + \Delta/3$ et $x(N-1) + 2\Delta/3$ avec $\Delta = x(N-1) - x(N-2)$.
+
+La sortie contient $3N$ valeurs : $x(0),\, y(\tfrac{1}{3}),\, y(\tfrac{2}{3}),\, x(1), \ldots$
 
 ---
 
@@ -103,17 +111,17 @@ Application de l'interpolation 1D de manière séparable :
 1. Interpoler chaque **ligne** : image $L \times H \to 2L \times H$.
 2. Interpoler chaque **colonne** du résultat : $2L \times H \to 2L \times 2H$.
 
-Complexité : $O(L \cdot H)$, identique à la version directe mais plus facile à optimiser.
+Les valeurs intermédiaires restent en réels ; l'arrondi en `u8` se fait une seule fois, à la fin. Complexité : $O(L \cdot H)$.
 
 ---
 
 ## 9. Rotation
 
-Mapping inverse autour du centre $(c_x, c_y)$ avec l'angle $-\theta$ :
+Mapping inverse autour du centre $(c_x, c_y)$ : on applique au pixel de sortie la rotation d'angle $-\theta$ :
 
-$$\begin{pmatrix} x_s \\ y_s \end{pmatrix} = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pmatrix} \begin{pmatrix} x_d - c_x \\ y_d - c_y \end{pmatrix} + \begin{pmatrix} c_x \\ c_y \end{pmatrix}$$
+$$\begin{pmatrix} x_s \\ y_s \end{pmatrix} = \begin{pmatrix} \cos\theta & \sin\theta \\ -\sin\theta & \cos\theta \end{pmatrix} \begin{pmatrix} x_d - c_x \\ y_d - c_y \end{pmatrix} + \begin{pmatrix} c_x \\ c_y \end{pmatrix}$$
 
-Les pixels sources hors image sont mis à 0 (fond noir). L'interpolation choisie (PPV, bilinéaire, bicubique) est appliquée au point $(x_s, y_s)$.
+Comme l'axe $y$ de l'image est orienté vers le bas, un angle positif fait tourner l'image dans le sens horaire à l'écran. Les pixels sources hors image sont mis à 0 (fond noir). L'interpolation choisie (PPV, bilinéaire, bicubique) est appliquée au point $(x_s, y_s)$.
 
 ---
 
@@ -124,7 +132,10 @@ Les pixels sources hors image sont mis à 0 (fond noir). L'interpolation choisie
 | Gestion des bords (redimensionnement, rotation) | Réplication du pixel bord le plus proche |
 | Méthode par défaut | Bilinéaire (bon compromis qualité/vitesse) |
 | Bicubique | Catmull-Rom ($a = -0{,}5$), noyau séparable |
-| Zoom x2 séparable | Lignes puis colonnes, arrondi intermédiaire en `u8` |
+| Interpolation 1D, bords | Parabole par 3 points dans le premier et le dernier intervalle, extrapolation linéaire après le dernier point |
+| Zoom x2 séparable | Lignes puis colonnes, valeurs réelles, un seul arrondi final |
+| Couleur | Canal par canal (`redimensionner_rvb`, `zoom_rvb`) |
+| Paramètres invalides | `Erreur::Parametre` (dimension nulle, facteur ≤ 0, NaN ou infini) |
 | Rotation — fond | Noir (0) pour les pixels hors image source |
 
 ---
@@ -165,5 +176,5 @@ imagerie interpolation zoom-couleur images/couleur.ppm rapport/figures/interpola
 - Le **plus proche voisin** produit des artefacts de crénelage bien visibles sur la mire.
 - Le **bilinéaire** lisse ces artefacts au prix d'un léger flou.
 - Le **bicubique** préserve mieux les contours tout en supprimant le crénelage.
-- Le **zoom séparable** donne des résultats identiques au zoom direct bilinéaire.
+- Le **zoom séparable** ne donne pas exactement le même résultat que le zoom direct : il garde les pixels d'origine aux positions paires et extrapole la dernière ligne et la dernière colonne, alors que `zoom` aligne les coins des deux images.
 - La **rotation** introduit un fond noir aux coins ; avec PPV les bords sont crénelés, avec bilinéaire ils sont doux.
