@@ -84,8 +84,8 @@ pub fn executer(cmd: Cmd) -> Resultat<()> {
             facteur,
             methode,
         } => {
-            let m = parse_methode(&methode);
-            let r = interpolation::zoom(&es::charger_gris(entree)?, facteur, m)?;
+            let img = es::charger_gris(entree)?;
+            let r = interpolation::zoom(&img, facteur, parse_methode(&methode))?;
             es::enregistrer_gris(&r, sortie)
         }
 
@@ -96,8 +96,9 @@ pub fn executer(cmd: Cmd) -> Resultat<()> {
             hauteur,
             methode,
         } => {
+            let img = es::charger_gris(entree)?;
             let m = parse_methode(&methode);
-            let r = interpolation::redimensionner(&es::charger_gris(entree)?, largeur, hauteur, m)?;
+            let r = interpolation::redimensionner(&img, largeur, hauteur, m)?;
             es::enregistrer_gris(&r, sortie)
         }
 
@@ -107,11 +108,8 @@ pub fn executer(cmd: Cmd) -> Resultat<()> {
             facteur,
             methode,
         } => {
-            let m = parse_methode(&methode);
             let img = es::charger_couleur(entree)?;
-            let nouvelle_largeur = ((img.largeur() as f64 * facteur).round() as usize).max(1);
-            let nouvelle_hauteur = ((img.hauteur() as f64 * facteur).round() as usize).max(1);
-            let r = interpolation::redimensionner_rvb(&img, nouvelle_largeur, nouvelle_hauteur, m)?;
+            let r = interpolation::zoom_rvb(&img, facteur, parse_methode(&methode))?;
             es::enregistrer_couleur(&r, sortie)
         }
 
@@ -120,7 +118,8 @@ pub fn executer(cmd: Cmd) -> Resultat<()> {
             sortie,
             facteur,
         } => {
-            let r = interpolation::agrandir_par_copie(&es::charger_gris(entree)?, facteur)?;
+            let img = es::charger_gris(entree)?;
+            let r = interpolation::agrandir_par_copie(&img, facteur)?;
             es::enregistrer_gris(&r, sortie)
         }
 
@@ -129,8 +128,8 @@ pub fn executer(cmd: Cmd) -> Resultat<()> {
             sortie,
             methode,
         } => {
-            let m = parse_methode(&methode);
-            let r = interpolation::zoom_x2_separable(&es::charger_gris(entree)?, m);
+            let img = es::charger_gris(entree)?;
+            let r = interpolation::zoom_x2_separable(&img, parse_methode(&methode));
             es::enregistrer_gris(&r, sortie)
         }
 
@@ -140,8 +139,8 @@ pub fn executer(cmd: Cmd) -> Resultat<()> {
             angle,
             methode,
         } => {
-            let m = parse_methode(&methode);
-            let r = interpolation::rotation(&es::charger_gris(entree)?, angle, m);
+            let img = es::charger_gris(entree)?;
+            let r = interpolation::rotation(&img, angle, parse_methode(&methode));
             es::enregistrer_gris(&r, sortie)
         }
     }

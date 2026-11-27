@@ -21,8 +21,14 @@ pub enum Methode {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers d'interpolation bas niveau
+// Fonctions auxiliaires
 // ---------------------------------------------------------------------------
+
+/// Arrondit et sature une valeur réelle dans [0, 255].
+#[inline]
+fn vers_u8(v: f64) -> u8 {
+    v.round().clamp(0.0, 255.0) as u8
+}
 
 /// Accès sûr à un pixel en niveaux de gris, bord répliqué.
 #[inline]
@@ -50,12 +56,12 @@ fn bilineaire(img: &ImageGris, px: f64, py: f64) -> u8 {
         + dx * (1.0 - dy) * f10
         + (1.0 - dx) * dy * f01
         + dx * dy * f11;
-    v.round().clamp(0.0, 255.0) as u8
+    vers_u8(v)
 }
 
 /// Poids cubique de Catmull-Rom : w(t) pour |t| ∈ [0, 2].
 ///
-/// Formule du cours (a = -0.5) :
+/// Formule (a = -0.5) :
 /// |t| < 1 : (a+2)|t|³ − (a+3)|t|² + 1
 /// 1 ≤ |t| < 2 : a|t|³ − 5a|t|² + 8a|t| − 4a
 #[inline]
@@ -88,7 +94,7 @@ fn bicubique(img: &ImageGris, px: f64, py: f64) -> u8 {
             valeur += wx * wy * pixel_gris(img, x0 + n, y0 + m);
         }
     }
-    valeur.round().clamp(0.0, 255.0) as u8
+    vers_u8(valeur)
 }
 
 /// Applique la méthode d'interpolation choisie en un point (px, py) flottant.
@@ -104,8 +110,20 @@ fn interpoler_pixel(img: &ImageGris, px: f64, py: f64, methode: Methode) -> u8 {
     }
 }
 
+/// Dimensions obtenues en multipliant (largeur, hauteur) par `facteur`.
+fn dimensions_zoom(largeur: usize, hauteur: usize, facteur: f64) -> Resultat<(usize, usize)> {
+    if facteur <= 0.0 || !facteur.is_finite() {
+        return Err(Erreur::Parametre(
+            "le facteur de zoom doit être un réel strictement positif".into(),
+        ));
+    }
+    let l = ((largeur as f64 * facteur).round() as usize).max(1);
+    let h = ((hauteur as f64 * facteur).round() as usize).max(1);
+    Ok((l, h))
+}
+
 // ---------------------------------------------------------------------------
-// Fonctions publiques
+// Redimensionnement et zoom
 // ---------------------------------------------------------------------------
 
 /// Redimensionne l'image à une taille quelconque.
@@ -144,14 +162,8 @@ pub fn redimensionner(
 
 /// Zoom d'un facteur réel (> 1 agrandit, < 1 réduit).
 pub fn zoom(img: &ImageGris, facteur: f64, methode: Methode) -> Resultat<ImageGris> {
-    if facteur <= 0.0 {
-        return Err(Erreur::Parametre(
-            "le facteur de zoom doit être positif".into(),
-        ));
-    }
-    let nouvelle_largeur = ((img.largeur() as f64 * facteur).round() as usize).max(1);
-    let nouvelle_hauteur = ((img.hauteur() as f64 * facteur).round() as usize).max(1);
-    redimensionner(img, nouvelle_largeur, nouvelle_hauteur, methode)
+    let (l, h) = dimensions_zoom(img.largeur(), img.hauteur(), facteur)?;
+    redimensionner(img, l, h, methode)
 }
 
 /// Version couleur de `redimensionner` (canal par canal).
@@ -169,6 +181,12 @@ pub fn redimensionner_rvb(
     ImageRvb::fusionner_canaux(&r2, &v2, &b2)
 }
 
+/// Version couleur de `zoom` (canal par canal).
+pub fn zoom_rvb(img: &ImageRvb, facteur: f64, methode: Methode) -> Resultat<ImageRvb> {
+    let (l, h) = dimensions_zoom(img.largeur(), img.hauteur(), facteur)?;
+    redimensionner_rvb(img, l, h, methode)
+}
+
 /// Plus proche voisin par copie de chaque ligne et de chaque colonne `facteur` fois.
 ///
 /// Chaque pixel source (x, y) est répété `facteur` fois en colonne et `facteur`
@@ -183,7 +201,7 @@ pub fn agrandir_par_copie(img: &ImageGris, facteur: usize) -> Resultat<ImageGris
         return Ok(ImageGris::nouvelle(0, 0, 0));
     }
     let resultat = ImageGris::depuis_fonction(nouvelle_largeur, nouvelle_hauteur, |xd, yd| {
-        // Pixel source : division entière
+        // Pixel source : division entière des coordonnées.
         img[(xd / facteur, yd / facteur)]
     });
     Ok(resultat)
@@ -193,15 +211,39 @@ pub fn agrandir_par_copie(img: &ImageGris, facteur: usize) -> Resultat<ImageGris
 // Interpolation 1D (formules du cours)
 // ---------------------------------------------------------------------------
 
+/// Valeur cubique au milieu de l'intervalle [x(i), x(i+1)].
+///
+/// - intérieur : (−x(i−1) + 9 x(i) + 9 x(i+1) − x(i+2)) / 16 ;
+/// - premier intervalle (pas de x(i−1)) : parabole par x(0), x(1), x(2),
+///   soit (3 x(0) + 6 x(1) − x(2)) / 8 ;
+/// - dernier intervalle (pas de x(i+2)) : parabole par x(i−1), x(i), x(i+1),
+///   soit (−x(i−1) + 6 x(i) + 3 x(i+1)) / 8 ;
+///
+/// Les deux formules de bord reviennent à extrapoler l'échantillon manquant par
+/// une parabole (x(−1) = 3 x(0) − 3 x(1) + x(2)) puis à appliquer la formule /16.
+/// - deux points seulement : milieu linéaire.
+fn milieu_cubique(x: &[f64], i: usize) -> f64 {
+    let n = x.len();
+    if n < 3 {
+        (x[i] + x[i + 1]) / 2.0
+    } else if i == 0 {
+        (3.0 * x[0] + 6.0 * x[1] - x[2]) / 8.0
+    } else if i + 2 >= n {
+        (-x[i - 1] + 6.0 * x[i] + 3.0 * x[i + 1]) / 8.0
+    } else {
+        (-x[i - 1] + 9.0 * x[i] + 9.0 * x[i + 1] - x[i + 2]) / 16.0
+    }
+}
+
 /// Interpolation 1D d'un facteur 2 avec les formules du cours :
+/// - linéaire : y(i+1/2) = (x(i) + x(i+1)) / 2, extrapolation 2 x(N) - x(N-1) au bout ;
+/// - cubique : y(i+1/2) = (-x(i-1) + 9 x(i) + 9 x(i+1) - x(i+2)) / 16, avec les
+///   extrapolations parabolique et linéaire aux extrémités.
 ///
-/// **Linéaire** : pour chaque i, on insère entre x(i) et x(i+1) :
-///   y(i+1/2) = (x(i) + x(i+1)) / 2
-///   Extrapolation au bord droit (demi-pas) : x(N-1) + ½·(x(N-1) − x(N-2)).
-///
-/// **Cubique** (Catmull-Rom 1D) : pour chaque i, on insère entre x(i) et x(i+1) :
-///   y(i+1/2) = (−x(i-1) + 9·x(i) + 9·x(i+1) − x(i+2)) / 16
-///   Extrapolations parabolique aux extrémités (voir commentaires internes).
+/// La sortie contient 2N valeurs : x(0), y(1/2), x(1), y(3/2), ..., x(N−1), y(N−1/2)
+/// (indices à partir de 0). Pour la dernière, l'échantillon manquant est extrapolé
+/// linéairement, x(N) = 2 x(N−1) − x(N−2), puis on prend le milieu avec x(N−1).
+/// `PlusProcheVoisin` est traité comme la version linéaire.
 pub fn interpoler_ligne_x2(ligne: &[f64], methode: Methode) -> Vec<f64> {
     let n = ligne.len();
     if n == 0 {
@@ -211,74 +253,62 @@ pub fn interpoler_ligne_x2(ligne: &[f64], methode: Methode) -> Vec<f64> {
         return vec![ligne[0], ligne[0]];
     }
 
-    // Accès sûr avec réplication de bord.
-    let get = |i: isize| -> f64 {
-        let j = i.clamp(0, n as isize - 1) as usize;
-        ligne[j]
-    };
+    let mut sortie = Vec::with_capacity(2 * n);
+    for (i, paire) in ligne.windows(2).enumerate() {
+        let milieu = match methode {
+            Methode::PlusProcheVoisin | Methode::Bilineaire => (paire[0] + paire[1]) / 2.0,
+            Methode::Bicubique => milieu_cubique(ligne, i),
+        };
+        sortie.push(paire[0]);
+        sortie.push(milieu);
+    }
+    // Dernier point, puis milieu avec l'échantillon extrapolé 2 x(N−1) − x(N−2).
+    let extrapole = 2.0 * ligne[n - 1] - ligne[n - 2];
+    sortie.push(ligne[n - 1]);
+    sortie.push((ligne[n - 1] + extrapole) / 2.0);
+    sortie
+}
 
-    match methode {
-        // Linéaire : [x0, (x0+x1)/2, x1, (x1+x2)/2, ..., x_{n-1}, extrapol]
-        Methode::PlusProcheVoisin | Methode::Bilineaire => {
-            let mut sortie = Vec::with_capacity(2 * n);
-            for i in 0..n {
-                sortie.push(ligne[i]);
-                // Valeur interpolée entre i et i+1
-                let milieu = if i + 1 < n {
-                    (ligne[i] + ligne[i + 1]) / 2.0
-                } else {
-                    // Extrapolation linéaire au bord droit (t = +0.5) :
-                    // x(N-1) + 0.5·(x(N-1) − x(N-2))
-                    ligne[n - 1] + 0.5 * (ligne[n - 1] - ligne[n - 2])
-                };
-                sortie.push(milieu);
-            }
-            sortie
-        }
-        // Cubique : [x0, m(0), x1, m(1), ..., x_{n-1}, extrapol]
-        Methode::Bicubique => {
-            let mut sortie = Vec::with_capacity(2 * n);
-            for i in 0..n {
-                sortie.push(ligne[i]);
-                // Formule cubique entre i et i+1 :
-                // y(i+1/2) = (−x(i−1) + 9·x(i) + 9·x(i+1) − x(i+2)) / 16
-                let milieu = if i + 1 < n {
-                    (-get(i as isize - 1) + 9.0 * get(i as isize) + 9.0 * get(i as isize + 1)
-                        - get(i as isize + 2))
-                        / 16.0
-                } else {
-                    // Extrapolation parabolique au bord droit.
-                    // Parabole passant par x(N-3), x(N-2), x(N-1) évaluée en N-0.5 :
-                    // On utilise la formule de différences finies du 2e ordre.
-                    let xm2 = ligne[n.saturating_sub(3)];
-                    let xm1 = ligne[n.saturating_sub(2)];
-                    let x0 = ligne[n - 1];
-                    // Extrapolation par différences finies du 2e ordre à t=+0.5
-                    x0 + 0.5 * (x0 - xm1) + 0.125 * ((x0 - xm1) - (xm1 - xm2))
-                };
-                sortie.push(milieu);
-            }
-            sortie
-        }
+/// Valeurs cubiques en t = 1/3 et t = 2/3 de l'intervalle [x(i), x(i+1)].
+///
+/// Avec a = x(i−1), b = x(i), c = x(i+1), d = x(i+2) (spline de Catmull-Rom) :
+/// - t = 1/3 : (−6a + 63b + 27c − 3d) / 81 ;
+/// - t = 2/3 : (−3a + 27b + 63c − 6d) / 81.
+///
+/// Aux extrémités, parabole par les trois points disponibles :
+/// - premier intervalle : (45 x(0) + 45 x(1) − 9 x(2)) / 81 et (18 x(0) + 72 x(1) − 9 x(2)) / 81 ;
+/// - dernier intervalle : (−9 a + 72 b + 18 c) / 81 et (−9 a + 45 b + 45 c) / 81.
+fn tiers_cubiques(x: &[f64], i: usize) -> (f64, f64) {
+    let n = x.len();
+    if n < 3 {
+        let (b, c) = (x[i], x[i + 1]);
+        ((2.0 * b + c) / 3.0, (b + 2.0 * c) / 3.0)
+    } else if i == 0 {
+        let (b, c, d) = (x[0], x[1], x[2]);
+        (
+            (45.0 * b + 45.0 * c - 9.0 * d) / 81.0,
+            (18.0 * b + 72.0 * c - 9.0 * d) / 81.0,
+        )
+    } else if i + 2 >= n {
+        let (a, b, c) = (x[i - 1], x[i], x[i + 1]);
+        (
+            (-9.0 * a + 72.0 * b + 18.0 * c) / 81.0,
+            (-9.0 * a + 45.0 * b + 45.0 * c) / 81.0,
+        )
+    } else {
+        let (a, b, c, d) = (x[i - 1], x[i], x[i + 1], x[i + 2]);
+        (
+            (-6.0 * a + 63.0 * b + 27.0 * c - 3.0 * d) / 81.0,
+            (-3.0 * a + 27.0 * b + 63.0 * c - 6.0 * d) / 81.0,
+        )
     }
 }
 
 /// Interpolation cubique 1D d'un facteur 3 (formules en /81 du cours).
 ///
-/// Pour chaque intervalle [x(i), x(i+1)], on produit 3 valeurs :
-///   t = 1/3 : y₁ = (−x(i-1) + 9·x(i)  + ...
-///   t = 2/3 : y₂ = ...
-/// Formules générales (Catmull-Rom évaluées en t et 1-t avec le polynôme du cours) :
-///   Les coefficients pour t = 1/3 et t = 2/3 sont déduits de :
-///   p(t) = ((-x_{i-1} + 3x_i - 3x_{i+1} + x_{i+2})t³
-///           + (2x_{i-1} - 5x_i + 4x_{i+1} - x_{i+2})t²
-///           + (-x_{i-1} + x_{i+1})t
-///           + 2x_i) / 2
-///
-/// Après multiplication × 81 pour t = 1/3 et t = 2/3, on retrouve
-/// les formules entières du cours :
-///   t = 1/3 : (−x_{i-1} + 9x_i + 9x_{i+1} − x_{i+2}) evaluée différemment
-///   (Les coefficients exacts /81 sont précisés dans le corps de la fonction.)
+/// La sortie contient 3N valeurs : x(0), y(1/3), y(2/3), x(1), ..., x(N−1), puis
+/// deux valeurs extrapolées linéairement x(N−1) + Δ/3 et x(N−1) + 2Δ/3, avec
+/// Δ = x(N−1) − x(N−2). Les coefficients sont donnés dans `tiers_cubiques`.
 pub fn interpoler_ligne_x3_cubique(ligne: &[f64]) -> Vec<f64> {
     let n = ligne.len();
     if n == 0 {
@@ -288,45 +318,18 @@ pub fn interpoler_ligne_x3_cubique(ligne: &[f64]) -> Vec<f64> {
         return vec![ligne[0], ligne[0], ligne[0]];
     }
 
-    // Accès sûr avec réplication de bord.
-    let get = |i: isize| -> f64 {
-        let j = i.clamp(0, n as isize - 1) as usize;
-        ligne[j]
-    };
-
-    // Évalue le spline cubique de Catmull-Rom entre l'indice i et i+1 à t ∈ [0,1].
-    // p(t) = 0.5 * [(-a + 3b - 3c + d)t³ + (2a - 5b + 4c - d)t² + (-a + c)t + 2b]
-    // avec a=x(i-1), b=x(i), c=x(i+1), d=x(i+2).
-    let catmull_rom = |i: isize, t: f64| -> f64 {
-        let a = get(i - 1);
-        let b = get(i);
-        let c = get(i + 1);
-        let d = get(i + 2);
-        let t2 = t * t;
-        let t3 = t2 * t;
-        0.5 * ((-a + 3.0 * b - 3.0 * c + d) * t3
-            + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2
-            + (-a + c) * t
-            + 2.0 * b)
-    };
-
-    // La sortie pour n points contient 3n valeurs :
-    // x(0), p(0,1/3), p(0,2/3), x(1), p(1,1/3), p(1,2/3), ..., x(n-1), ext1, ext2
     let mut sortie = Vec::with_capacity(3 * n);
-    for i in 0..n {
-        sortie.push(ligne[i]);
-        let t1 = 1.0 / 3.0;
-        let t2 = 2.0 / 3.0;
-        if i + 1 < n {
-            sortie.push(catmull_rom(i as isize, t1));
-            sortie.push(catmull_rom(i as isize, t2));
-        } else {
-            // Extrapolation linéaire au-delà du dernier point
-            let delta = ligne[n - 1] - ligne[n - 2];
-            sortie.push(ligne[n - 1] + t1 * delta);
-            sortie.push(ligne[n - 1] + t2 * delta);
-        }
+    for (i, &xi) in ligne[..n - 1].iter().enumerate() {
+        let (t1, t2) = tiers_cubiques(ligne, i);
+        sortie.push(xi);
+        sortie.push(t1);
+        sortie.push(t2);
     }
+    // Dernier point, puis extrapolation linéaire.
+    let delta = ligne[n - 1] - ligne[n - 2];
+    sortie.push(ligne[n - 1]);
+    sortie.push(ligne[n - 1] + delta / 3.0);
+    sortie.push(ligne[n - 1] + 2.0 * delta / 3.0);
     sortie
 }
 
@@ -338,6 +341,7 @@ pub fn interpoler_ligne_x3_cubique(ligne: &[f64]) -> Vec<f64> {
 ///
 /// Étape 1 : interpoler chaque ligne → image temporaire de largeur 2L × H.
 /// Étape 2 : interpoler chaque colonne de l'image temporaire → image 2L × 2H.
+/// Les valeurs intermédiaires restent en réels ; l'arrondi se fait à la fin.
 pub fn zoom_x2_separable(img: &ImageGris, methode: Methode) -> ImageGris {
     let l = img.largeur();
     let h = img.hauteur();
@@ -345,27 +349,22 @@ pub fn zoom_x2_separable(img: &ImageGris, methode: Methode) -> ImageGris {
         return ImageGris::nouvelle(0, 0, 0);
     }
 
-    // Étape 1 : interpolation horizontale (sur les lignes).
-    // Chaque ligne de l pixels devient 2l pixels.
-    let l2 = 2 * l;
-    let mut tmp = ImageGris::nouvelle(l2, h, 0);
-    for y in 0..h {
-        let ligne_f64: Vec<f64> = img.ligne(y).iter().map(|&p| p as f64).collect();
-        let interpolee = interpoler_ligne_x2(&ligne_f64, methode);
-        for x in 0..l2.min(interpolee.len()) {
-            tmp[(x, y)] = interpolee[x].round().clamp(0.0, 255.0) as u8;
-        }
-    }
+    // Étape 1 : interpolation horizontale, lignes de l → 2l valeurs.
+    let lignes: Vec<Vec<f64>> = (0..h)
+        .map(|y| {
+            let ligne: Vec<f64> = img.ligne(y).iter().map(|&p| p as f64).collect();
+            interpoler_ligne_x2(&ligne, methode)
+        })
+        .collect();
 
-    // Étape 2 : interpolation verticale (sur les colonnes).
-    // Chaque colonne de h pixels devient 2h pixels.
+    // Étape 2 : interpolation verticale, colonnes de h → 2h valeurs.
+    let l2 = 2 * l;
     let h2 = 2 * h;
     let mut sortie = ImageGris::nouvelle(l2, h2, 0);
     for x in 0..l2 {
-        let colonne_f64: Vec<f64> = (0..h).map(|y| tmp[(x, y)] as f64).collect();
-        let interpolee = interpoler_ligne_x2(&colonne_f64, methode);
-        for y in 0..h2.min(interpolee.len()) {
-            sortie[(x, y)] = interpolee[y].round().clamp(0.0, 255.0) as u8;
+        let colonne: Vec<f64> = lignes.iter().map(|ligne| ligne[x]).collect();
+        for (y, &v) in interpoler_ligne_x2(&colonne, methode).iter().enumerate() {
+            sortie[(x, y)] = vers_u8(v);
         }
     }
     sortie
@@ -395,6 +394,8 @@ pub fn rotation(img: &ImageGris, angle_degres: f64, methode: Methode) -> ImageGr
     // Centre de l'image (en coordonnées réelles).
     let cx = (l as f64 - 1.0) / 2.0;
     let cy = (h as f64 - 1.0) / 2.0;
+    let xmax = l as f64 - 1.0;
+    let ymax = h as f64 - 1.0;
 
     ImageGris::depuis_fonction(l, h, |xd, yd| {
         // Vecteur depuis le centre.
@@ -405,16 +406,12 @@ pub fn rotation(img: &ImageGris, angle_degres: f64, methode: Methode) -> ImageGr
         let xs = cos_a * dx - sin_a * dy + cx;
         let ys = sin_a * dx + cos_a * dy + cy;
 
-        // Vérifie que le pixel source est dans l'image.
-        if xs < -0.5 || xs > l as f64 - 0.5 || ys < -0.5 || ys > h as f64 - 0.5 {
-            0 // fond noir
+        // Pixel source hors de l'image : fond noir.
+        let dedans = (-0.5..=xmax + 0.5).contains(&xs) && (-0.5..=ymax + 0.5).contains(&ys);
+        if dedans {
+            interpoler_pixel(img, xs.clamp(0.0, xmax), ys.clamp(0.0, ymax), methode)
         } else {
-            interpoler_pixel(
-                img,
-                xs.clamp(0.0, l as f64 - 1.0),
-                ys.clamp(0.0, h as f64 - 1.0),
-                methode,
-            )
+            0
         }
     })
 }
@@ -426,44 +423,39 @@ pub fn rotation(img: &ImageGris, angle_degres: f64, methode: Methode) -> ImageGr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::ImageGris;
-
-    // ---- Helpers ----
+    use crate::image::Rvb;
 
     fn img2x2() -> ImageGris {
         // Pixels : (0,0)=0  (1,0)=100  (0,1)=200  (1,1)=255
         ImageGris::depuis_vec(2, 2, vec![0, 100, 200, 255]).unwrap()
     }
 
+    fn proches(a: &[f64], b: &[f64]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9)
+    }
+
     // ---- agrandir_par_copie ----
 
     #[test]
     fn copie_x2_carre() {
-        // 2×2 → 4×4 : chaque pixel répété en bloc 2×2
-        let img = img2x2();
-        let r = agrandir_par_copie(&img, 2).unwrap();
+        // 2×2 → 4×4 : chaque pixel répété en bloc 2×2.
+        let r = agrandir_par_copie(&img2x2(), 2).unwrap();
         assert_eq!(r.dimensions(), (4, 4));
-        // Coin haut-gauche (0,0)=0, (1,0)=0
-        assert_eq!(r[(0, 0)], 0);
-        assert_eq!(r[(1, 0)], 0);
-        // Coin haut-droit (2,0)=100, (3,0)=100
-        assert_eq!(r[(2, 0)], 100);
-        assert_eq!(r[(3, 0)], 100);
-        // Coin bas-droit (3,3)=255
-        assert_eq!(r[(3, 3)], 255);
+        assert_eq!(r.ligne(0), &[0, 0, 100, 100]);
+        assert_eq!(r.ligne(1), &[0, 0, 100, 100]);
+        assert_eq!(r.ligne(2), &[200, 200, 255, 255]);
+        assert_eq!(r.ligne(3), &[200, 200, 255, 255]);
     }
 
     #[test]
     fn copie_facteur_1_identique() {
         let img = img2x2();
-        let r = agrandir_par_copie(&img, 1).unwrap();
-        assert_eq!(r, img);
+        assert_eq!(agrandir_par_copie(&img, 1).unwrap(), img);
     }
 
     #[test]
     fn copie_facteur_zero_erreur() {
-        let img = img2x2();
-        assert!(agrandir_par_copie(&img, 0).is_err());
+        assert!(agrandir_par_copie(&img2x2(), 0).is_err());
     }
 
     // ---- redimensionner / zoom ----
@@ -471,134 +463,194 @@ mod tests {
     #[test]
     fn zoom_identite() {
         let img = img2x2();
-        let r = zoom(&img, 1.0, Methode::Bilineaire).unwrap();
-        assert_eq!(r, img);
+        assert_eq!(zoom(&img, 1.0, Methode::Bilineaire).unwrap(), img);
+        assert_eq!(zoom(&img, 1.0, Methode::Bicubique).unwrap(), img);
     }
 
     #[test]
-    fn zoom_x2_ppv_taille() {
-        let img = img2x2();
-        let r = zoom(&img, 2.0, Methode::PlusProcheVoisin).unwrap();
-        assert_eq!(r.dimensions(), (4, 4));
+    fn redimensionner_bilineaire_valeurs() {
+        // Ligne [0, 100] → 3 pixels : le milieu vaut 50.
+        let img = ImageGris::depuis_vec(2, 1, vec![0, 100]).unwrap();
+        let r = redimensionner(&img, 3, 1, Methode::Bilineaire).unwrap();
+        assert_eq!(r, ImageGris::depuis_vec(3, 1, vec![0, 50, 100]).unwrap());
+    }
+
+    #[test]
+    fn redimensionner_ppv_valeurs() {
+        // Ligne [10, 20, 30] → 5 pixels : xs = 0, 0.5, 1, 1.5, 2 arrondis.
+        let img = ImageGris::depuis_vec(3, 1, vec![10, 20, 30]).unwrap();
+        let r = redimensionner(&img, 5, 1, Methode::PlusProcheVoisin).unwrap();
+        assert_eq!(
+            r,
+            ImageGris::depuis_vec(5, 1, vec![10, 20, 20, 30, 30]).unwrap()
+        );
     }
 
     #[test]
     fn redimensionner_dimensions_correctes() {
-        let img = img2x2();
-        let r = redimensionner(&img, 5, 7, Methode::Bilineaire).unwrap();
+        let r = redimensionner(&img2x2(), 5, 7, Methode::Bilineaire).unwrap();
         assert_eq!(r.dimensions(), (5, 7));
     }
 
     #[test]
-    fn zoom_facteur_negatif_erreur() {
+    fn redimensionner_dimension_nulle_erreur() {
         let img = img2x2();
-        assert!(zoom(&img, -1.0, Methode::Bilineaire).is_err());
+        assert!(redimensionner(&img, 0, 3, Methode::Bilineaire).is_err());
     }
 
     #[test]
-    fn bilineaire_coins_exacts() {
-        // Les coins d'un zoom x2 bilinéaire doivent être égaux aux coins sources.
+    fn zoom_facteur_invalide_erreur() {
         let img = img2x2();
-        let r = zoom(&img, 2.0, Methode::Bilineaire).unwrap();
-        // Coin haut-gauche
-        assert_eq!(r[(0, 0)], img[(0, 0)]);
-        // Coin haut-droit
-        assert_eq!(r[(r.largeur() - 1, 0)], img[(img.largeur() - 1, 0)]);
-        // Coin bas-droit
-        assert_eq!(
-            r[(r.largeur() - 1, r.hauteur() - 1)],
-            img[(img.largeur() - 1, img.hauteur() - 1)]
-        );
+        assert!(zoom(&img, -1.0, Methode::Bilineaire).is_err());
+        assert!(zoom(&img, 0.0, Methode::Bilineaire).is_err());
+        assert!(zoom(&img, f64::NAN, Methode::Bilineaire).is_err());
+        assert!(zoom(&img, f64::INFINITY, Methode::Bilineaire).is_err());
+    }
+
+    #[test]
+    fn zoom_x2_coins_conserves() {
+        // Les coins d'un zoom (mapping aux coins) sont ceux de l'image source.
+        let img = img2x2();
+        for methode in [
+            Methode::PlusProcheVoisin,
+            Methode::Bilineaire,
+            Methode::Bicubique,
+        ] {
+            let r = zoom(&img, 2.0, methode).unwrap();
+            assert_eq!(r.dimensions(), (4, 4));
+            assert_eq!(r[(0, 0)], 0);
+            assert_eq!(r[(3, 0)], 100);
+            assert_eq!(r[(0, 3)], 200);
+            assert_eq!(r[(3, 3)], 255);
+        }
+    }
+
+    #[test]
+    fn bicubique_image_constante() {
+        // Les poids de Catmull-Rom somment à 1 : une image constante reste constante.
+        let img = ImageGris::nouvelle(3, 3, 77);
+        let r = zoom(&img, 2.5, Methode::Bicubique).unwrap();
+        assert!(r.ligne(0).iter().all(|&p| p == 77));
+        assert!(r.ligne(r.hauteur() - 1).iter().all(|&p| p == 77));
+    }
+
+    // ---- versions couleur ----
+
+    #[test]
+    fn redimensionner_rvb_image_constante() {
+        let couleur = Rvb::new(10, 20, 30);
+        let img = ImageRvb::nouvelle(2, 2, couleur);
+        let r = redimensionner_rvb(&img, 4, 6, Methode::Bilineaire).unwrap();
+        assert_eq!(r, ImageRvb::nouvelle(4, 6, couleur));
+    }
+
+    #[test]
+    fn zoom_rvb_taille_et_erreur() {
+        let img = ImageRvb::nouvelle(2, 3, Rvb::new(1, 2, 3));
+        let r = zoom_rvb(&img, 2.0, Methode::PlusProcheVoisin).unwrap();
+        assert_eq!(r.dimensions(), (4, 6));
+        assert!(zoom_rvb(&img, -2.0, Methode::Bilineaire).is_err());
     }
 
     // ---- interpoler_ligne_x2 ----
 
     #[test]
+    fn interpoler_ligne_x2_lineaire_valeurs() {
+        // [0, 100] → [0, 50, 100, (100 + 200) / 2] avec x(2) extrapolé = 2·100 − 0.
+        let r = interpoler_ligne_x2(&[0.0, 100.0], Methode::Bilineaire);
+        assert!(proches(&r, &[0.0, 50.0, 100.0, 150.0]));
+    }
+
+    #[test]
     fn interpoler_ligne_x2_lineaire_longueur() {
-        let ligne = vec![0.0, 100.0, 200.0];
-        let r = interpoler_ligne_x2(&ligne, Methode::Bilineaire);
-        // 3 points → 6 valeurs
+        let r = interpoler_ligne_x2(&[0.0, 100.0, 200.0], Methode::Bilineaire);
         assert_eq!(r.len(), 6);
     }
 
     #[test]
-    fn interpoler_ligne_x2_lineaire_valeurs() {
-        // [0, 100] → [0, 50, 100, extrapolation(150)]
-        let ligne = vec![0.0, 100.0];
-        let r = interpoler_ligne_x2(&ligne, Methode::Bilineaire);
-        assert_eq!(r.len(), 4);
-        assert!((r[0] - 0.0).abs() < 1e-9);
-        assert!((r[1] - 50.0).abs() < 1e-9); // milieu
-        assert!((r[2] - 100.0).abs() < 1e-9);
-        assert!((r[3] - 150.0).abs() < 1e-9); // extrapolation linéaire
+    fn interpoler_ligne_x2_cubique_valeurs() {
+        // x = [0, 0, 16, 0, 0], calculé à la main :
+        // i=0 (parabole)  : (3·0 + 6·0 − 16) / 8         = −2
+        // i=1 (intérieur) : (−0 + 9·0 + 9·16 − 0) / 16   = 9
+        // i=2 (intérieur) : (−0 + 9·16 + 9·0 − 0) / 16   = 9
+        // i=3 (parabole)  : (−16 + 6·0 + 3·0) / 8        = −2
+        // fin (linéaire)  : (0 + (2·0 − 0)) / 2           = 0
+        let r = interpoler_ligne_x2(&[0.0, 0.0, 16.0, 0.0, 0.0], Methode::Bicubique);
+        let attendu = [0.0, -2.0, 0.0, 9.0, 16.0, 9.0, 0.0, -2.0, 0.0, 0.0];
+        assert!(proches(&r, &attendu), "{r:?}");
     }
 
     #[test]
-    fn interpoler_ligne_x2_cubique_longueur() {
-        let ligne = vec![10.0, 20.0, 30.0, 40.0];
-        let r = interpoler_ligne_x2(&ligne, Methode::Bicubique);
-        assert_eq!(r.len(), 8);
+    fn interpoler_ligne_x2_cubique_rampe() {
+        // Toutes les formules (cubique, paraboles, extrapolation) sont exactes sur une droite.
+        let r = interpoler_ligne_x2(&[0.0, 10.0, 20.0, 30.0], Methode::Bicubique);
+        assert!(proches(&r, &[0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]));
     }
 
     #[test]
-    fn interpoler_ligne_x2_cubique_points_originaux() {
-        // Les points originaux (indices pairs) doivent être conservés.
-        let ligne = vec![10.0, 50.0, 90.0];
-        let r = interpoler_ligne_x2(&ligne, Methode::Bicubique);
-        assert!((r[0] - 10.0).abs() < 1e-9);
-        assert!((r[2] - 50.0).abs() < 1e-9);
-        assert!((r[4] - 90.0).abs() < 1e-9);
+    fn interpoler_ligne_x2_cas_limites() {
+        assert!(interpoler_ligne_x2(&[], Methode::Bicubique).is_empty());
+        assert!(proches(
+            &interpoler_ligne_x2(&[7.0], Methode::Bicubique),
+            &[7.0, 7.0]
+        ));
     }
 
     // ---- interpoler_ligne_x3_cubique ----
 
     #[test]
-    fn interpoler_ligne_x3_longueur() {
-        let ligne = vec![0.0, 1.0, 2.0, 3.0];
-        let r = interpoler_ligne_x3_cubique(&ligne);
-        // 4 points → 12 valeurs
-        assert_eq!(r.len(), 12);
+    fn interpoler_ligne_x3_valeurs() {
+        // x = [0, 0, 81, 0, 0], calculé à la main avec les formules en /81 :
+        // i=0 (parabole)  : −9·81/81 = −9 et −9
+        // i=1 (intérieur) : 27·81/81 = 27 et 63
+        // i=2 (intérieur) : 63 et 27
+        // i=3 (parabole)  : −9 et −9
+        // fin (linéaire)  : Δ = 0 → 0 et 0
+        let r = interpoler_ligne_x3_cubique(&[0.0, 0.0, 81.0, 0.0, 0.0]);
+        let attendu = [
+            0.0, -9.0, -9.0, 0.0, 27.0, 63.0, 81.0, 63.0, 27.0, 0.0, -9.0, -9.0, 0.0, 0.0, 0.0,
+        ];
+        assert!(proches(&r, &attendu), "{r:?}");
     }
 
     #[test]
-    fn interpoler_ligne_x3_points_originaux() {
-        // Les valeurs aux indices multiples de 3 doivent coïncider avec les originaux.
-        let ligne = vec![10.0, 40.0, 70.0, 100.0];
+    fn interpoler_ligne_x3_rampe_exacte() {
+        // Sur une droite de pente 30, la sortie est la droite de pente 10.
+        let ligne: Vec<f64> = (0..6).map(|i| i as f64 * 30.0).collect();
         let r = interpoler_ligne_x3_cubique(&ligne);
-        assert!((r[0] - 10.0).abs() < 1e-9);
-        assert!((r[3] - 40.0).abs() < 1e-9);
-        assert!((r[6] - 70.0).abs() < 1e-9);
-        assert!((r[9] - 100.0).abs() < 1e-9);
+        let attendu: Vec<f64> = (0..18).map(|k| k as f64 * 10.0).collect();
+        assert!(proches(&r, &attendu), "{r:?}");
     }
 
     #[test]
-    fn interpoler_ligne_x3_monotone() {
-        // Sur une rampe linéaire, l'intérieur reste dans [0, 90] ; l'extrapolation
-        // au bord droit pousse jusqu'à 90 + (2/3)·10 ≈ 96.67.
-        let ligne: Vec<f64> = (0..10).map(|i| i as f64 * 10.0).collect();
-        let r = interpoler_ligne_x3_cubique(&ligne);
-        for &v in &r {
-            assert!((-1.0..=97.0).contains(&v), "valeur hors plage : {v}");
-        }
-        assert!((r[r.len() - 2] - (90.0 + 10.0 / 3.0)).abs() < 1e-9);
-        assert!((r[r.len() - 1] - (90.0 + 20.0 / 3.0)).abs() < 1e-9);
+    fn interpoler_ligne_x3_cas_limites() {
+        assert!(interpoler_ligne_x3_cubique(&[]).is_empty());
+        assert!(proches(&interpoler_ligne_x3_cubique(&[5.0]), &[5.0; 3]));
+        // Deux points : interpolation linéaire.
+        let r = interpoler_ligne_x3_cubique(&[0.0, 30.0]);
+        assert!(proches(&r, &[0.0, 10.0, 20.0, 30.0, 40.0, 50.0]));
     }
 
     // ---- zoom_x2_separable ----
 
     #[test]
-    fn zoom_x2_separable_taille() {
-        let img = img2x2();
-        let r = zoom_x2_separable(&img, Methode::Bilineaire);
+    fn zoom_x2_separable_bilineaire_valeurs() {
+        // [0, 100] / [200, 255] lignes puis colonnes, saturé à 255.
+        // Lignes : [0, 50, 100, 150] et [200, 227.5, 255, 282.5].
+        // Colonnes : x(0), milieu, x(1), x(1) + (x(1) − x(0)) / 2.
+        let r = zoom_x2_separable(&img2x2(), Methode::Bilineaire);
         assert_eq!(r.dimensions(), (4, 4));
+        assert_eq!(r.ligne(0), &[0, 50, 100, 150]);
+        assert_eq!(r.ligne(1), &[100, 139, 178, 216]);
+        assert_eq!(r.ligne(2), &[200, 228, 255, 255]);
+        assert_eq!(r.ligne(3), &[255, 255, 255, 255]);
     }
 
     #[test]
-    fn zoom_x2_separable_coin_haut_gauche() {
-        // Le pixel (0,0) doit rester inchangé.
-        let img = img2x2();
-        let r = zoom_x2_separable(&img, Methode::Bilineaire);
-        assert_eq!(r[(0, 0)], img[(0, 0)]);
+    fn zoom_x2_separable_image_vide() {
+        let vide = ImageGris::nouvelle(0, 0, 0);
+        let r = zoom_x2_separable(&vide, Methode::Bicubique);
+        assert_eq!(r.dimensions(), (0, 0));
     }
 
     // ---- rotation ----
@@ -606,37 +658,39 @@ mod tests {
     #[test]
     fn rotation_zero_degre_identique() {
         let img = img2x2();
-        let r = rotation(&img, 0.0, Methode::Bilineaire);
-        assert_eq!(r, img);
+        assert_eq!(rotation(&img, 0.0, Methode::Bilineaire), img);
+    }
+
+    #[test]
+    fn rotation_90_degres() {
+        // Rotation de 90° autour du centre d'une image 3×3 (PPV, sans perte).
+        // Le sens suit le repère image (y vers le bas).
+        let img = ImageGris::depuis_vec(3, 3, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap();
+        let r = rotation(&img, 90.0, Methode::PlusProcheVoisin);
+        let attendu = ImageGris::depuis_vec(3, 3, vec![7, 4, 1, 8, 5, 2, 9, 6, 3]).unwrap();
+        assert_eq!(r, attendu);
     }
 
     #[test]
     fn rotation_360_identique() {
         let img = img2x2();
         let r = rotation(&img, 360.0, Methode::Bilineaire);
-        // La rotation complète doit reproduire l'image (petites erreurs d'arrondi tolérées).
         for y in 0..img.hauteur() {
             for x in 0..img.largeur() {
                 let diff = (r[(x, y)] as i32 - img[(x, y)] as i32).abs();
-                assert!(diff <= 2, "différence trop grande en ({x},{y}) : {diff}");
+                assert!(diff <= 1, "différence trop grande en ({x},{y}) : {diff}");
             }
         }
     }
 
     #[test]
-    fn rotation_dimensions_inchangees() {
-        let img = ImageGris::depuis_fonction(5, 7, |x, y| ((x + y) * 10) as u8);
-        let r = rotation(&img, 45.0, Methode::PlusProcheVoisin);
-        assert_eq!(r.dimensions(), img.dimensions());
-    }
-
-    // ---- redimensionner_rvb ----
-
-    #[test]
-    fn redimensionner_rvb_dimensions() {
-        use crate::image::Rvb;
-        let img = ImageRvb::depuis_fonction(2, 2, |x, y| Rvb::new(x as u8 * 100, y as u8 * 100, 0));
-        let r = redimensionner_rvb(&img, 4, 6, Methode::Bilineaire).unwrap();
-        assert_eq!(r.dimensions(), (4, 6));
+    fn rotation_coins_noirs() {
+        // À 45°, les coins de sortie viennent de l'extérieur de l'image : fond noir.
+        let img = ImageGris::nouvelle(9, 9, 200);
+        let r = rotation(&img, 45.0, Methode::Bilineaire);
+        assert_eq!(r.dimensions(), (9, 9));
+        assert_eq!(r[(0, 0)], 0);
+        assert_eq!(r[(8, 8)], 0);
+        assert_eq!(r[(4, 4)], 200);
     }
 }
