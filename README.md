@@ -36,6 +36,7 @@ imagerie/            bibliothèque : un module par partie du cours
   src/binaire.rs       ch. 7  distances, Freeman, étiquetage, hystérésis
   src/morphologie.rs   ch. 7  érosion, dilatation, ouverture, fermeture
 imagerie-cli/        application en ligne de commande (une commande par opération)
+imagerie-gui/        application graphique (egui)
 images/              images de test
 rapport/             rapport : une section par module, figures
 ```
@@ -60,7 +61,14 @@ cargo run --release -- contours sobel images/mire.pgm contours.pgm --seuil 60
 cargo run --release -- binaire etiquetage images/formes.pgm etiquettes.ppm --huit
 ```
 
-Le programme s'appelle `imagerie` : après `cargo install --path imagerie-cli`
+Interface graphique : ouvrir une image, choisir une opération par chapitre,
+régler ses paramètres, comparer avant/après, voir l'histogramme, enregistrer.
+
+```sh
+cargo run --release -p imagerie-gui
+```
+
+Le programme en ligne de commande s'appelle `imagerie` : après `cargo install --path imagerie-cli`
 on peut taper directement `imagerie ponctuel egalisation ...`.
 
 ## Images de test
