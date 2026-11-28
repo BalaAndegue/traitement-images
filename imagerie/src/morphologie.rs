@@ -1,10 +1,6 @@
 //! Chapitre 7 (deuxième partie) : opérateurs morphologiques.
 //!
-
 //! Responsable : Nkolo Atangana Stacy Julie.
-
-// À retirer quand toutes les fonctions sont écrites.
-#![allow(unused_variables)]
 
 use crate::erreur::{Erreur, Resultat};
 use crate::image::{Bord, ImageBinaire, ImageGris};
